@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import hashlib
 import json
 import shutil
@@ -35,12 +35,13 @@ def count_id_in_files(files, qid):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--project-root", required=True)
-    parser.add_argument("--module-root", required=True)
+    parser.add_argument("--project-root", default=None)
+    parser.add_argument("--module-root", default=None)
     args = parser.parse_args()
 
-    project_root = Path(args.project_root).resolve()
-    module_root = Path(args.module_root).resolve()
+    default_root = Path(__file__).resolve().parents[1]
+    project_root = Path(args.project_root).resolve() if args.project_root else default_root
+    module_root = Path(args.module_root).resolve() if args.module_root else project_root
     sys.path.insert(0, str(module_root))
 
     from utils.core_config import build_runtime_config
@@ -173,3 +174,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
