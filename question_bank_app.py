@@ -570,7 +570,7 @@ AI_ENV_DEFAULTS = {
     "AI_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "AI_MODEL_NAME": "qwen-vl-plus",
     "AI_SOLVER_MODEL_NAME": "qwen3.6-flash",
-    "AI_OCR_PROMPT": "请识别这张图片中的数学题，并严格按照 LaTeX 格式输出。",
+    "AI_OCR_PROMPT": DEFAULT_OCR_PROMPT,
 }
 
 AI_ENV_WRITE_ORDER = (
@@ -1813,7 +1813,7 @@ def call_ai_for_tags(content: str) -> dict:
     if not api_key or not base_url or not model_name:
         return {"error": "AI 配置不完整，请检查 .env 文件"}
         
-    prompt = f"""你是一个专业的高中数学教研专家。请分析以下 LaTeX 格式的数学题目，并为其打上合适的“难度星级”和“知识标签”。
+    prompt = f"""你是一个{AI_ROLE_TAGGER}。请分析以下 LaTeX 格式的数学题目，并为其打上合适的“难度星级”和“知识标签”。
 
 要求：
 1. 难度星级：0.0 到 6.0 的浮点数，步长为 0.5（例如 2.5, 3.0, 4.5）。其中，0-2星为基础题，3-4星为中档题，5-6星为压轴/难题。
@@ -2088,7 +2088,7 @@ solutions_tex 必须是完整的 \\begin{{solutions}}...\\end{{solutions}} 环�
 
 problem_tex：
 {problem_tex}"""
-        return f"""你是一名资深高中数学教研专家。请为下面的 LaTeX problem 生成对应的答案与解析。
+        return f"""你是一名{AI_ROLE_SOLVER}。请为下面的 LaTeX problem 生成对应的答案与解析。
 
 要求：
 1) 严格输出 JSON 格式，包含两个字段：answer_tex 与 solutions_tex。不要输出多余解释。
@@ -2409,7 +2409,7 @@ def call_ai_for_polish(intent_text: str) -> str:
     if not api_key or not base_url or not model_name:
         return "❌ AI 配置不完整，请检查 .env 文件"
         
-    prompt = f"""你是一个资深的高中数学教研专家。请帮我润色以下组卷意图，使其更加专业、明确、富有条理。
+    prompt = f"""你是一个{AI_ROLE_EXAM_INTENT}。请帮我润色以下组卷意图，使其更加专业、明确、富有条理。
 润色后的文本将用于指导后续的 AI 抽题算法。
 要求：
 1. 保持原意不变，但语言更精准。
@@ -6065,6 +6065,7 @@ def generate_exam_paper(export_filename, export_dir, blocks, theme_name):
         template_content = re.sub(r'\\title\{.*?\}', f'\\\\title{{{export_filename}}}', template_content)
     elif r'\renewcommand{\mytitle}' in template_content:
         template_content = re.sub(r'\\renewcommand\{\\mytitle\}\{.*?\}', f'\\\\renewcommand{{\\\\mytitle}}{{{export_filename}}}', template_content)
+    template_content = re.sub(r'\\subject\{.*?\}', f'\\\\subject{{{EXPORT_TEMPLATE_SUBJECT_NAME}}}', template_content, count=1)
     
     # 查找 \begin{document} 之后的内容
     doc_idx = template_content.find(r'\begin{document}')
@@ -8665,7 +8666,7 @@ def page_advanced_search():
 
 # ================= 主程序 =================
 def main():
-    st.set_page_config(page_title="高中数学题库管理系统", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title=PAGE_TITLE, layout="wide", initial_sidebar_state="expanded")
     
     inject_custom_css()
     inject_sidebar_recovery_control()

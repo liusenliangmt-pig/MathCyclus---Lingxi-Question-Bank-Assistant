@@ -1,5 +1,12 @@
 import os
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*_args, **_kwargs):
+        return False
+
+from .discipline_config import CURRENT_DISCIPLINE
 
 # 加载环境变量
 load_dotenv()
@@ -8,6 +15,19 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHAPTERS_DIR = os.path.join(BASE_DIR, "chapters")
 CSV_INDEX_PATH = os.path.join(BASE_DIR, "utils", "题库索引表.csv")
+
+# 学科配置
+DISCIPLINE_KEY = CURRENT_DISCIPLINE.key
+DISCIPLINE_NAME = CURRENT_DISCIPLINE.subject_name
+SUBJECTS = list(CURRENT_DISCIPLINE.subjects)
+PAGE_TITLE = CURRENT_DISCIPLINE.page_title
+DEFAULT_OCR_PROMPT = CURRENT_DISCIPLINE.default_ocr_prompt
+AI_ROLE_TAGGER = CURRENT_DISCIPLINE.ai_role_tagger
+AI_ROLE_SOLVER = CURRENT_DISCIPLINE.ai_role_solver
+AI_ROLE_EXAM_INTENT = CURRENT_DISCIPLINE.ai_role_exam_intent
+EXPORT_TEMPLATE_SUBJECT_NAME = CURRENT_DISCIPLINE.template_subject_name
+MAIN_TEX_TITLE = CURRENT_DISCIPLINE.main_tex_title
+MAIN_TEX_CHAPTER_ORDER = list(CURRENT_DISCIPLINE.main_tex_chapter_order)
 
 # AI 配置
 AI_API_KEY = os.getenv("AI_API_KEY")
@@ -21,13 +41,15 @@ if os.path.exists(ocr_prompt_file):
         AI_OCR_PROMPT = f.read()
 else:
     # 处理 .env 中的换行符转义
-    AI_OCR_PROMPT = os.getenv("AI_OCR_PROMPT", "请识别这张图片中的数学题，并严格按照 LaTeX 格式输出。").replace('\\n', '\n')
+    AI_OCR_PROMPT = os.getenv("AI_OCR_PROMPT", DEFAULT_OCR_PROMPT).replace("\\n", "\n")
 
 
-SUBJECTS = [
-    "集合", "复数", "不等式", "函数", "概率", "统计", "排列组合", 
-    "解析几何", "圆锥曲线", "解三角形", "三角函数", "立体几何", "向量", 
-    "数列", "导数", "线性规划", "数论", "命题与逻辑", "流程框图", "未分类"
-]
-
-PAPER_TYPES = {"G": "高考题", "M": "模拟题", "W": "外国题", "XK": "学考题", "XS": "线上联考", "QJ": "强基计划题", "JS": "竞赛题"}
+PAPER_TYPES = {
+    "G": "高考题",
+    "M": "模拟题",
+    "W": "外国题",
+    "XK": "学考题",
+    "XS": "线上联考",
+    "QJ": "强基计划题",
+    "JS": "竞赛题",
+}
