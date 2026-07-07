@@ -10,6 +10,7 @@ import html
 import subprocess
 import shutil
 import uuid
+import random
 from dotenv import load_dotenv, dotenv_values
 try:
     from PIL import ImageGrab
@@ -26,10 +27,144 @@ APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(APP_ROOT, ".env"))
 
 from utils.core_config import *
+from utils.core_config import build_runtime_config
+from utils.discipline_config import DEFAULT_DISCIPLINE_KEY, list_discipline_options, normalize_discipline_code
 from utils.file_ops import *
 from utils.tikz_ops import *
 from utils.latex_ops import *
 from utils.csv_ops import add_to_csv_index, update_csv_index_for_edit
+
+
+DISCIPLINE_SESSION_KEY = "active_discipline_code"
+DISCIPLINE_SELECT_WIDGET_KEY = "discipline_selector"
+DISCIPLINE_STATE_KEYS = (
+    "browse_subject",
+    "browse_mode",
+    "adv_search_active",
+    "adv_last_query",
+    "adv_last_results",
+    "adv_results_page",
+    "adv_t1",
+    "adv_t2",
+    "adv_t3",
+    "adv_q1",
+    "adv_q2",
+    "adv_q3",
+    "adv_q1_sel",
+    "adv_q2_sel",
+    "adv_q3_sel",
+    "time_browse_page",
+    "time_max_show_prev",
+    "exam_selected_qs",
+    "exam_blocks",
+    "exam_mode_stage",
+    "exam_theme_select",
+    "exam_theme",
+    "exam_q_count_input",
+    "exam_expanded_q",
+    "ai_exam_active",
+    "ai_exam_modified",
+    "ai_exam_diff_val",
+    "ai_exam_intent",
+    "recent_saved_active",
+    "recent_saved_paths",
+)
+
+
+def state_key(discipline_code: str, name: str) -> str:
+    return f"{normalize_discipline_code(discipline_code)}_{name}"
+
+
+def get_active_discipline_code() -> str:
+    return normalize_discipline_code(st.session_state.get(DISCIPLINE_SESSION_KEY, DEFAULT_DISCIPLINE_KEY))
+
+
+def get_runtime_config_for(discipline_code: str | None = None):
+    return build_runtime_config(discipline_code or get_active_discipline_code(), base_dir=APP_ROOT)
+
+
+def get_active_runtime_config():
+    return get_runtime_config_for(get_active_discipline_code())
+
+
+def activate_discipline_namespace(discipline_code: str):
+    for name in DISCIPLINE_STATE_KEYS:
+        namespaced = state_key(discipline_code, name)
+        if namespaced in st.session_state:
+            st.session_state[name] = st.session_state[namespaced]
+        else:
+            st.session_state.pop(name, None)
+
+
+def persist_discipline_namespace(discipline_code: str):
+    for name in DISCIPLINE_STATE_KEYS:
+        namespaced = state_key(discipline_code, name)
+        if name in st.session_state:
+            st.session_state[namespaced] = st.session_state[name]
+        else:
+            st.session_state.pop(namespaced, None)
+
+
+def get_state_value(name: str, default=None, discipline_code: str | None = None):
+    return st.session_state.get(state_key(discipline_code or get_active_discipline_code(), name), default)
+
+
+def set_state_value(name: str, value, discipline_code: str | None = None):
+    st.session_state[state_key(discipline_code or get_active_discipline_code(), name)] = value
+
+
+def init_namespaced_widget_state(discipline_code: str, widget_name: str, default, valid_values=None):
+    widget_key = state_key(discipline_code, widget_name)
+    persist_key = state_key(discipline_code, f"persist_{widget_name}")
+    value = st.session_state.get(persist_key, default)
+    if valid_values is not None and value not in valid_values:
+        value = default
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = value
+    elif valid_values is not None and st.session_state[widget_key] not in valid_values:
+        st.session_state[widget_key] = default
+    return widget_key, persist_key
+
+
+def _csv_index_cache_token_for_runtime(runtime_config) -> str:
+    csv_path = runtime_config.csv_index_path
+    if not os.path.exists(csv_path):
+        return f"{runtime_config.discipline_key}:{csv_path}:missing"
+    return f"{runtime_config.discipline_key}:{csv_path}:{file_change_token(csv_path)}"
+
+
+def _chapters_cache_token_for_runtime(runtime_config) -> str:
+    chapters_dir = runtime_config.chapters_dir
+    mtime = int(os.path.getmtime(chapters_dir)) if os.path.exists(chapters_dir) else 0
+    return f"{runtime_config.discipline_key}:{chapters_dir}:{mtime}"
+
+
+@st.cache_data(show_spinner=False)
+def _csv_index_cached_for_runtime(discipline_code, csv_path, csv_token):
+    from utils.csv_ops import read_csv_index
+
+    return read_csv_index(csv_path=csv_path)
+
+
+def get_cached_csv_rows(runtime_config=None):
+    runtime = runtime_config or get_active_runtime_config()
+    return _csv_index_cached_for_runtime(
+        runtime.discipline_key,
+        runtime.csv_index_path,
+        _csv_index_cache_token_for_runtime(runtime),
+    )
+
+
+def get_row_abs_path(row: dict, runtime_config=None) -> str:
+    runtime = runtime_config or get_active_runtime_config()
+    rel_path = (row.get("相对文件路径", "") or "").strip()
+    if not rel_path:
+        return ""
+    return os.path.join(runtime.chapters_dir, rel_path)
+
+
+def physics_readonly_notice():
+    st.info("物理题库写入功能将在后续阶段开放。")
 
 # ================= 工具函数 =================
 # 注入自定义 CSS
@@ -929,6 +1064,9 @@ def zoom_image(img):
 
 @st.dialog("MathCyclus 题库介绍", width="large")
 def show_mathcyclus_intro():
+    if get_active_discipline_code() == "physics":
+        st.info("当前为物理题库模式。物理题库写入功能将在后续阶段开放。")
+        return
     intro_path = os.path.join(BASE_DIR, "MathCyclus题库介绍.html")
     if not os.path.exists(intro_path):
         st.error("未找到 MathCyclus题库介绍.html")
@@ -5957,6 +6095,7 @@ def _replace_choices_with_items(text: str) -> str:
     return text
 
 def generate_exam_paper(export_filename, export_dir, blocks, theme_name):
+    runtime = get_active_runtime_config()
     # 确保导出目录存在
     ensure_dir(export_dir)
     
@@ -6065,7 +6204,7 @@ def generate_exam_paper(export_filename, export_dir, blocks, theme_name):
         template_content = re.sub(r'\\title\{.*?\}', f'\\\\title{{{export_filename}}}', template_content)
     elif r'\renewcommand{\mytitle}' in template_content:
         template_content = re.sub(r'\\renewcommand\{\\mytitle\}\{.*?\}', f'\\\\renewcommand{{\\\\mytitle}}{{{export_filename}}}', template_content)
-    template_content = re.sub(r'\\subject\{.*?\}', f'\\\\subject{{{EXPORT_TEMPLATE_SUBJECT_NAME}}}', template_content, count=1)
+    template_content = re.sub(r'\\subject\{.*?\}', f'\\\\subject{{{runtime.export_template_subject_name}}}', template_content, count=1)
     
     # 查找 \begin{document} 之后的内容
     doc_idx = template_content.find(r'\begin{document}')
@@ -6936,10 +7075,11 @@ def page_tag_edit():
         if year:
             csv_token = _csv_index_cache_token()
             try:
-                csv_rows = _csv_index_cached(csv_token)
+                runtime = get_active_runtime_config()
+                csv_rows = _csv_index_cached(runtime.discipline_key, runtime.csv_index_path, csv_token)
             except Exception:
                 from utils.csv_ops import read_csv_index
-                csv_rows = read_csv_index()
+                csv_rows = read_csv_index(csv_path=get_active_runtime_config().csv_index_path)
 
             papers_set = set()
             for row in csv_rows:
@@ -7053,10 +7193,11 @@ def page_tag_edit():
 
             csv_token = _csv_index_cache_token()
             try:
-                csv_rows = _csv_index_cached(csv_token)
+                runtime = get_active_runtime_config()
+                csv_rows = _csv_index_cached(runtime.discipline_key, runtime.csv_index_path, csv_token)
             except Exception:
                 from utils.csv_ops import read_csv_index
-                csv_rows = read_csv_index()
+                csv_rows = read_csv_index(csv_path=get_active_runtime_config().csv_index_path)
 
             results = []
             for row in csv_rows:
@@ -7284,11 +7425,11 @@ def _parse_tag_history_time(value: str) -> float:
     return 0.0
 
 @st.cache_data(show_spinner=False)
-def _tag_history_suggestions_cached(csv_token, limit=5):
+def _tag_history_suggestions_cached(discipline_code, csv_path, csv_token, limit=5):
     from utils.csv_ops import read_csv_index
 
     stats = {}
-    for row in read_csv_index():
+    for row in read_csv_index(csv_path=csv_path):
         row_time = max(
             _parse_tag_history_time(row.get("最后修改时间", "")),
             _parse_tag_history_time(row.get("初次录入的时间", "")),
@@ -7305,7 +7446,13 @@ def _tag_history_suggestions_cached(csv_token, limit=5):
     return ranked[:limit]
 
 def get_tag_history_suggestions(limit=5):
-    return _tag_history_suggestions_cached(file_change_token(CSV_INDEX_PATH), limit)
+    runtime = get_active_runtime_config()
+    return _tag_history_suggestions_cached(
+        runtime.discipline_key,
+        runtime.csv_index_path,
+        _csv_index_cache_token_for_runtime(runtime),
+        limit,
+    )
 
 def _append_tag_text(current_tags: str, tag: str) -> str:
     tags = _split_tag_values(current_tags)
@@ -7749,22 +7896,21 @@ def clear_statistics_cache():
     get_statistics.clear()
 
 def _csv_index_cache_token():
-    from utils.core_config import CSV_INDEX_PATH
-    return file_change_token(CSV_INDEX_PATH)
+    return _csv_index_cache_token_for_runtime(get_active_runtime_config())
 
 @st.cache_data(show_spinner=False)
-def _csv_index_cached(csv_token):
+def _csv_index_cached(discipline_code, csv_path, csv_token):
     from utils.csv_ops import read_csv_index
-    return read_csv_index()
+    return read_csv_index(csv_path=csv_path)
 
 @st.cache_data(show_spinner=False)
-def _advanced_search_index_cached(csv_token):
+def _advanced_search_index_cached(discipline_code, csv_path, chapters_dir, csv_token):
     from utils.csv_ops import read_csv_index
 
     index_rows = []
-    for row in read_csv_index():
+    for row in read_csv_index(csv_path=csv_path):
         rel_path = (row.get("相对文件路径", "") or "").strip()
-        abs_path = os.path.join(CHAPTERS_DIR, rel_path) if rel_path else ""
+        abs_path = os.path.join(chapters_dir, rel_path) if rel_path else ""
         filename = (row.get("文件名称", "") or "").strip()
         if filename and not filename.lower().endswith(".tex"):
             filename = filename + ".tex"
@@ -7791,7 +7937,7 @@ def _advanced_search_index_cached(csv_token):
     return index_rows
 
 @st.cache_data(ttl=10)
-def get_statistics():
+def get_statistics(discipline_code, csv_path, chapters_dir, subjects, csv_token, chapters_token):
     stats = {
         "total_questions": 0,
         "total_tikz": 0,
@@ -7814,7 +7960,7 @@ def get_statistics():
     # 优先尝试从 CSV 索引表读取（性能提升 100 倍）
     try:
         from utils.csv_ops import read_csv_index
-        csv_data = read_csv_index()
+        csv_data = read_csv_index(csv_path=csv_path)
         if csv_data:
             stats["total_questions"] = len(csv_data)
             
@@ -7897,10 +8043,10 @@ def get_statistics():
     # ================= 降级：文件夹遍历统计 =================
     today_start = datetime.datetime.combine(datetime.date.today(), datetime.time.min).timestamp()
     
-    if not os.path.exists(CHAPTERS_DIR):
+    if not os.path.exists(chapters_dir):
         return stats
         
-    for root, dirs, files in os.walk(CHAPTERS_DIR):
+    for root, dirs, files in os.walk(chapters_dir):
         is_tikz_dir = "相关图" in root
         
         for file in files:
@@ -7961,9 +8107,18 @@ def get_statistics():
 
 def render_statistics_dashboard():
     from utils.charts import generate_heatmap_html, generate_activity_curve_html, generate_echarts_bar_html, generate_echarts_pie_html
-    stats = get_statistics()
+    runtime = get_active_runtime_config()
+    stats = get_statistics(
+        runtime.discipline_key,
+        runtime.csv_index_path,
+        runtime.chapters_dir,
+        tuple(runtime.subjects),
+        _csv_index_cache_token_for_runtime(runtime),
+        _chapters_cache_token_for_runtime(runtime),
+    )
     
     st.markdown("### 📊 数据统计")
+    st.caption(f"{runtime.page_title} | {runtime.page_intro}")
     
     # 统计页视觉层：只调整展示质感，不改统计数据。
     st.markdown("""
@@ -8098,8 +8253,261 @@ def render_statistics_dashboard():
         components.html(generate_echarts_pie_html(type_counts, diff_counts, "题型与难度分布"), height=370)
 
 
+def _get_runtime_question_rows(runtime_config=None):
+    runtime = runtime_config or get_active_runtime_config()
+    rows = []
+    for row in get_cached_csv_rows(runtime):
+        abs_path = get_row_abs_path(row, runtime)
+        if not abs_path or not os.path.exists(abs_path):
+            continue
+        current = dict(row)
+        current["_abs_path"] = abs_path
+        current["_display_name"] = (row.get("文件名称", "") or os.path.basename(abs_path).replace(".tex", "")).strip()
+        rows.append(current)
+    return rows
+
+
+def _filter_runtime_rows(rows, keyword="", subject_filter="全部", stage_filter="全部", grade_filter="全部", qtype_filter="全部"):
+    filtered = []
+    keyword = (keyword or "").strip().lower()
+    for row in rows:
+        if subject_filter != "全部" and subject_filter not in str(row.get("知识板块", "") or ""):
+            continue
+        if stage_filter != "全部" and (row.get("学段", "") or "").strip() != stage_filter:
+            continue
+        if grade_filter != "全部" and (row.get("年级", "") or "").strip() != grade_filter:
+            continue
+        if qtype_filter != "全部" and (row.get("题型", "") or "").strip() != qtype_filter:
+            continue
+        if keyword:
+            haystack = "\n".join(
+                str(row.get(field, "") or "")
+                for field in ("文件名称", "试卷名称", "知识板块", "知识点", "标签", "备注", "题干", "答案", "解析")
+            ).lower()
+            if keyword not in haystack:
+                continue
+        filtered.append(row)
+    return filtered
+
+
+def _format_runtime_row_label(row):
+    year = (row.get("年份", "") or "").strip()
+    subject = (row.get("知识板块", "") or "").strip()
+    qid = (row.get("题目ID", "") or "").strip()
+    fname = row.get("_display_name", "") or (row.get("文件名称", "") or "").strip()
+    parts = [part for part in (qid, year, subject, fname) if part]
+    return " | ".join(parts) if parts else fname or "未命名题目"
+
+
+def _render_runtime_question_detail(row, runtime_config=None, selection_mode=False):
+    runtime = runtime_config or get_active_runtime_config()
+    abs_path = row.get("_abs_path") or get_row_abs_path(row, runtime)
+    if not abs_path or not os.path.exists(abs_path):
+        st.warning("题目文件不存在。")
+        return
+
+    with open(abs_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    render_static_question_header(_format_runtime_row_label(row), content, abs_path)
+
+    meta_lines = []
+    for label in ("学科", "学段", "年级", "知识板块", "知识点", "题型", "分值", "来源"):
+        value = (row.get(label, "") or "").strip()
+        if value:
+            meta_lines.append(f"{label}：{value}")
+    if meta_lines:
+        st.caption(" | ".join(meta_lines))
+
+    if selection_mode:
+        selected_key = state_key(runtime.discipline_key, "exam_selected_qs")
+        selected_paths = st.session_state.setdefault(selected_key, [])
+        is_selected = abs_path in selected_paths
+        if is_selected:
+            if st.button("❌ 本题取消组卷", key=f"{runtime.discipline_key}_remove_{abs_path}", type="primary", use_container_width=True):
+                st.session_state[selected_key] = [p for p in selected_paths if p != abs_path]
+                st.rerun()
+        else:
+            if st.button("➕ 本题加入组卷", key=f"{runtime.discipline_key}_add_{abs_path}", use_container_width=True):
+                st.session_state[selected_key] = selected_paths + [abs_path]
+                st.rerun()
+
+    try:
+        st.markdown(latex_to_markdown(content), unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"渲染错误: {e}")
+
+    with st.expander("查看文件路径"):
+        st.code(abs_path)
+
+
+def _render_readonly_runtime_browser(runtime_config=None, selection_mode=False, heading="🔍 全局浏览与编辑"):
+    runtime = runtime_config or get_active_runtime_config()
+    code = runtime.discipline_key
+    rows = _get_runtime_question_rows(runtime)
+    selected_key = state_key(code, "browse_selected_path")
+    random_key = state_key(code, "random_pick_paths")
+
+    st.header(heading)
+    st.caption(f"{runtime.discipline_name} | 当前题库 {len(rows)} 题 | 只读浏览")
+
+    block_options = ["全部"] + list(runtime.subjects)
+    stage_values = sorted({(row.get("学段", "") or "").strip() for row in rows if (row.get("学段", "") or "").strip()})
+    grade_values = sorted({(row.get("年级", "") or "").strip() for row in rows if (row.get("年级", "") or "").strip()})
+    qtype_values = sorted({(row.get("题型", "") or "").strip() for row in rows if (row.get("题型", "") or "").strip()})
+
+    subject_widget_key, subject_persist_key = init_namespaced_widget_state(code, "browse_subject_filter", "全部", block_options)
+    stage_widget_key, stage_persist_key = init_namespaced_widget_state(code, "browse_stage_filter", "全部", ["全部"] + stage_values)
+    grade_widget_key, grade_persist_key = init_namespaced_widget_state(code, "browse_grade_filter", "全部", ["全部"] + grade_values)
+    qtype_widget_key, qtype_persist_key = init_namespaced_widget_state(code, "browse_qtype_filter", "全部", ["全部"] + qtype_values)
+    keyword_widget_key, keyword_persist_key = init_namespaced_widget_state(code, "browse_keyword", "")
+    selected_label_widget_key, selected_label_persist_key = init_namespaced_widget_state(code, "browse_selected_label", "")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        subject_filter = st.selectbox("知识板块", block_options, key=subject_widget_key)
+    with c2:
+        stage_filter = st.selectbox("学段", ["全部"] + stage_values, key=stage_widget_key)
+    with c3:
+        grade_filter = st.selectbox("年级", ["全部"] + grade_values, key=grade_widget_key)
+    with c4:
+        qtype_filter = st.selectbox("题型", ["全部"] + qtype_values, key=qtype_widget_key)
+
+    keyword = st.text_input("全文搜索", placeholder="输入题干、答案、解析、标签或知识点关键词", key=keyword_widget_key)
+    st.session_state[subject_persist_key] = subject_filter
+    st.session_state[stage_persist_key] = stage_filter
+    st.session_state[grade_persist_key] = grade_filter
+    st.session_state[qtype_persist_key] = qtype_filter
+    st.session_state[keyword_persist_key] = keyword
+    filtered = _filter_runtime_rows(rows, keyword, subject_filter, stage_filter, grade_filter, qtype_filter)
+
+    info_c1, info_c2, info_c3 = st.columns([1, 1, 2])
+    with info_c1:
+        st.metric("当前结果", len(filtered))
+    with info_c2:
+        sample_size = min(3, len(filtered))
+        if st.button("🎲 随机抽题", key=state_key(code, "browse_random_button"), use_container_width=True, disabled=sample_size == 0):
+            st.session_state[random_key] = [row["_abs_path"] for row in random.sample(filtered, sample_size)]
+            st.rerun()
+    with info_c3:
+        random_paths = st.session_state.get(random_key, [])
+        if random_paths:
+            random_labels = []
+            by_path = {row["_abs_path"]: row for row in rows}
+            for path in random_paths:
+                if path in by_path:
+                    random_labels.append(_format_runtime_row_label(by_path[path]))
+            if random_labels:
+                st.caption("随机结果：" + "；".join(random_labels))
+
+    if not filtered:
+        st.info("当前筛选条件下没有题目。")
+        return
+
+    options = { _format_runtime_row_label(row): row for row in filtered }
+    default_path = st.session_state.get(selected_key)
+    labels = list(options.keys())
+    default_index = 0
+    if default_path:
+        for idx, row in enumerate(filtered):
+            if row["_abs_path"] == default_path:
+                default_index = idx
+                break
+
+    selected_label_kwargs = {"key": selected_label_widget_key}
+    if selected_label_widget_key not in st.session_state:
+        st.session_state[selected_label_widget_key] = labels[default_index]
+        selected_label_kwargs["index"] = default_index
+    elif st.session_state.get(selected_label_widget_key) not in labels:
+        st.session_state[selected_label_widget_key] = labels[default_index]
+    selected_label = st.selectbox("题目列表", labels, **selected_label_kwargs)
+    selected_row = options[selected_label]
+    st.session_state[selected_label_persist_key] = selected_label
+    st.session_state[selected_key] = selected_row["_abs_path"]
+    _render_runtime_question_detail(selected_row, runtime, selection_mode=selection_mode)
+
+
+def page_physics_readonly_browse(is_exam_mode=False):
+    runtime = get_active_runtime_config()
+    title = "🖨️ 物理组卷选题" if is_exam_mode else "🔍 物理题库浏览"
+    _render_readonly_runtime_browser(runtime, selection_mode=is_exam_mode, heading=title)
+
+
+def page_physics_advanced_search():
+    runtime = get_active_runtime_config()
+    _render_readonly_runtime_browser(runtime, selection_mode=False, heading="🔎 物理全文搜索")
+
+
+def page_physics_exam_generation():
+    runtime = get_active_runtime_config()
+    code = runtime.discipline_key
+    selected_key = state_key(code, "exam_selected_qs")
+    selected_paths = st.session_state.setdefault(selected_key, [])
+    rows = _get_runtime_question_rows(runtime)
+    by_path = {row["_abs_path"]: row for row in rows}
+
+    st.header("🖨️ 组卷服务")
+    st.caption("当前阶段开放物理题库的只读选题、已选题预览和 LaTeX 源文件导出。")
+
+    page_physics_readonly_browse(is_exam_mode=True)
+
+    st.markdown("---")
+    st.subheader(f"📋 已选问题 ({len(selected_paths)})")
+    if not selected_paths:
+        st.info("请先从上方题库中加入题目。")
+        return
+
+    for idx, path in enumerate(list(selected_paths), start=1):
+        row = by_path.get(path)
+        if row is None:
+            continue
+        c1, c2 = st.columns([5, 1])
+        with c1:
+            st.markdown(f"{idx}. {_format_runtime_row_label(row)}")
+        with c2:
+            if st.button("移除", key=f"{code}_exam_remove_{idx}", use_container_width=True):
+                st.session_state[selected_key] = [p for p in selected_paths if p != path]
+                st.rerun()
+
+    st.markdown("---")
+    c_theme, c_name, c_export = st.columns([1.3, 2.2, 1.2])
+    with c_theme:
+        theme_name = st.selectbox("模板", ["练习类模板", "讲义类模板", "试卷类模板"], key=state_key(code, "exam_theme_simple"))
+    with c_name:
+        today = datetime.date.today()
+        export_dir = os.path.join(BASE_DIR, "Test Paper Group", "导出文件", today.strftime("%Y"), today.strftime("%m"))
+        default_filename = _next_exam_export_filename(export_dir, theme_name, today=today)
+        export_filename = st.text_input("输出文件名", value=default_filename, key=state_key(code, "exam_export_name"))
+    with c_export:
+        st.write("")
+        st.write("")
+        if st.button("导出 LaTeX 源文件", type="primary", use_container_width=True):
+            blocks = [{"id": str(uuid.uuid4()), "type": "question", "path": path} for path in selected_paths if os.path.exists(path)]
+            output_path = generate_exam_paper(export_filename, export_dir, blocks, theme_name)
+            if output_path:
+                st.success(f"LaTeX 已导出：{output_path}")
+            else:
+                st.error("导出失败，请检查模板文件是否存在。")
+
+
+def render_readonly_feature_notice_page(title: str):
+    st.header(title)
+    physics_readonly_notice()
+
+
 # ================= 页面：规范说明 =================
 def page_manual():
+    runtime = get_active_runtime_config()
+    if runtime.discipline_key == "physics":
+        st.header("📖 物理题库说明")
+        st.markdown(f"""
+当前处于 `{runtime.subject_name}` 的 1D-1 只读接入阶段。
+
+- 已开放：学科切换、统计、浏览、筛选、全文搜索、单题详情、随机抽题、已选题与基础组卷。
+- 暂未开放：新题录入、标签编辑、批量修改、OCR 写入、AI 解答写入、删除题目。
+- 物理题库写入功能将在后续阶段开放。
+        """)
+        return
     st.header("📖 题库规范说明")
     st.markdown("""
     **📂 一、 文件命名规范**
@@ -8138,6 +8546,19 @@ def page_manual():
     """, unsafe_allow_html=True)
 
 def page_system_intro():
+    runtime = get_active_runtime_config()
+    if runtime.discipline_key == "physics":
+        st.header("📘 物理题库阶段说明")
+        st.markdown(f"""
+### 当前状态
+
+已接入 `{runtime.page_title}` 的基础骨架，当前题库来源为本地 `chapters_physics/` 与独立物理索引。
+
+- 当前仅开放只读浏览、筛选、搜索、抽题与基础组卷。
+- 数学与物理题库数据源、索引、缓存和已选题状态相互隔离。
+- 物理题库写入功能将在后续阶段开放。
+        """)
+        return
     st.header("📘 项目体系介绍（录入 · 浏览 · 标签 · 组卷）")
     st.markdown("""
 ### 🎯 这套系统解决什么问题？
@@ -8513,7 +8934,13 @@ def render_advanced_search_results(is_delete_mode=False):
     if st.session_state.get("adv_last_query") == query_key and st.session_state.get("adv_last_results") is not None:
         results = st.session_state.get("adv_last_results") or []
     else:
-        search_rows = _advanced_search_index_cached(_csv_index_cache_token())
+        runtime = get_active_runtime_config()
+        search_rows = _advanced_search_index_cached(
+            runtime.discipline_key,
+            runtime.csv_index_path,
+            runtime.chapters_dir,
+            _csv_index_cache_token_for_runtime(runtime),
+        )
 
         results = []
         with st.spinner("正在全库检索中..."):
@@ -8648,6 +9075,9 @@ def render_advanced_search_results(is_delete_mode=False):
         st.warning("未找到匹配的题目。")
 
 def page_advanced_search():
+    if get_active_discipline_code() == "physics":
+        page_physics_advanced_search()
+        return
     c_left, c_right = st.columns([1, 1.5])
     with c_left:
         st.header("🔎 三级查找")
@@ -8666,7 +9096,10 @@ def page_advanced_search():
 
 # ================= 主程序 =================
 def main():
-    st.set_page_config(page_title=PAGE_TITLE, layout="wide", initial_sidebar_state="expanded")
+    initial_code = normalize_discipline_code(st.session_state.get(DISCIPLINE_SESSION_KEY, DEFAULT_DISCIPLINE_KEY))
+    st.session_state[DISCIPLINE_SESSION_KEY] = initial_code
+    initial_runtime = get_runtime_config_for(initial_code)
+    st.set_page_config(page_title=initial_runtime.page_title, layout="wide", initial_sidebar_state="expanded")
     
     inject_custom_css()
     inject_sidebar_recovery_control()
@@ -8902,6 +9335,27 @@ def main():
         }
         </style>
         """, unsafe_allow_html=True)
+
+        discipline_options = list_discipline_options()
+        discipline_label_to_code = {label: code for code, label in discipline_options}
+        discipline_labels = [label for _code, label in discipline_options]
+        current_code = get_active_discipline_code()
+        current_label = next((label for code, label in discipline_options if code == current_code), discipline_labels[0])
+        selected_discipline_label = st.selectbox(
+            "学科切换",
+            discipline_labels,
+            index=discipline_labels.index(current_label),
+            key=DISCIPLINE_SELECT_WIDGET_KEY,
+        )
+        selected_discipline_code = discipline_label_to_code[selected_discipline_label]
+        if selected_discipline_code != current_code:
+            st.session_state[DISCIPLINE_SESSION_KEY] = selected_discipline_code
+            st.rerun()
+
+        st.session_state[DISCIPLINE_SESSION_KEY] = selected_discipline_code
+        activate_discipline_namespace(selected_discipline_code)
+        runtime = get_active_runtime_config()
+        st.caption(f"{runtime.page_title}\n\n{runtime.page_intro}")
         
         # 恢复为上下结构的图标+文字
         api_nav_option = "🔑\nAPI设置"
@@ -8954,19 +9408,33 @@ def main():
     if selected_nav == "📊\n数据统计":
         render_statistics_dashboard()
     elif selected_nav == "📝\n录入新题":
-        page_entry()
+        if get_active_discipline_code() == "physics":
+            render_readonly_feature_notice_page("📝 录入新题")
+        else:
+            page_entry()
     elif selected_nav == "🔍\n全局浏览与编辑":
-        page_browse()
+        if get_active_discipline_code() == "physics":
+            page_physics_readonly_browse(is_exam_mode=False)
+        else:
+            page_browse()
     elif selected_nav == exam_nav_option:
-        page_exam_paper_generation()
+        if get_active_discipline_code() == "physics":
+            page_physics_exam_generation()
+        else:
+            page_exam_paper_generation()
     elif selected_nav == "🛠️\n工具箱":
-        page_tools()
+        if get_active_discipline_code() == "physics":
+            render_readonly_feature_notice_page("🛠️ 工具箱")
+        else:
+            page_tools()
     elif selected_nav == "🔎\n三级查找":
         page_advanced_search()
     elif selected_nav == "📘\n项目介绍":
         page_system_intro()
     elif selected_nav == "📖\n规范说明":
         page_manual()
+
+    persist_discipline_namespace(get_active_discipline_code())
 
 if __name__ == "__main__":
     main()

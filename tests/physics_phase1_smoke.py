@@ -64,6 +64,7 @@ def main():
     core_config = importlib.import_module("utils.core_config")
     csv_ops = importlib.import_module("utils.csv_ops")
     init_csv_index = importlib.import_module("utils.init_csv_index")
+    question_bank_app = importlib.import_module("question_bank_app")
 
     results = []
 
@@ -153,6 +154,60 @@ def main():
         "physics stem answer solution non-empty",
         not empty_blocks,
         "\n".join(empty_blocks) if empty_blocks else "all non-empty",
+    )
+    assert_check(
+        results,
+        "state_key namespaced",
+        question_bank_app.state_key("physics", "browse_subject") == "physics_browse_subject",
+        question_bank_app.state_key("physics", "browse_subject"),
+    )
+
+    math_runtime_rows = question_bank_app._get_runtime_question_rows(math_runtime)
+    physics_runtime_rows = question_bank_app._get_runtime_question_rows(physics_runtime)
+    assert_check(
+        results,
+        "math runtime rows",
+        len(math_runtime_rows) == 70,
+        f"count={len(math_runtime_rows)}",
+    )
+    assert_check(
+        results,
+        "physics runtime rows",
+        len(physics_runtime_rows) == 8,
+        f"count={len(physics_runtime_rows)}",
+    )
+
+    junior_rows = question_bank_app._filter_runtime_rows(physics_runtime_rows, stage_filter="初中")
+    mechanics_rows = question_bank_app._filter_runtime_rows(physics_runtime_rows, subject_filter="力与运动")
+    assert_check(
+        results,
+        "physics stage filter",
+        len(junior_rows) == 4,
+        f"count={len(junior_rows)}",
+    )
+    assert_check(
+        results,
+        "physics subject filter",
+        len(mechanics_rows) == 1,
+        f"count={len(mechanics_rows)}",
+    )
+
+    export_dir = project_root / "outputs" / "physics_phase1_smoke"
+    blocks = [
+        {"id": "smoke-1", "type": "question", "path": physics_runtime_rows[0]["_abs_path"]},
+        {"id": "smoke-2", "type": "question", "path": physics_runtime_rows[1]["_abs_path"]},
+    ]
+    original_get_runtime = question_bank_app.get_active_runtime_config
+    question_bank_app.get_active_runtime_config = lambda: physics_runtime
+    try:
+        export_path = question_bank_app.generate_exam_paper("physics_phase1_smoke_export", str(export_dir), blocks, "练习类模板")
+    finally:
+        question_bank_app.get_active_runtime_config = original_get_runtime
+    assert_check(
+        results,
+        "physics latex export",
+        bool(export_path) and Path(export_path).exists(),
+        str(export_path),
     )
     assert_check(
         results,

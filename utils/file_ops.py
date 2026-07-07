@@ -2,42 +2,53 @@ import os
 import re
 from .core_config import CHAPTERS_DIR, SUBJECTS
 
+
+def _resolve_chapters_dir(chapters_dir=None):
+    return chapters_dir or CHAPTERS_DIR
+
+
+def _resolve_subjects(subjects=None):
+    return list(subjects) if subjects is not None else SUBJECTS
+
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
-def get_all_years_globally():
+def get_all_years_globally(chapters_dir=None, subjects=None):
     """获取所有板块中包含的年份集合"""
     years = set()
-    if not os.path.exists(CHAPTERS_DIR):
+    resolved_chapters_dir = _resolve_chapters_dir(chapters_dir)
+    resolved_subjects = _resolve_subjects(subjects)
+    if not os.path.exists(resolved_chapters_dir):
         return []
-    for subject in os.listdir(CHAPTERS_DIR):
-        subject_dir = os.path.join(CHAPTERS_DIR, subject)
+    for subject in resolved_subjects:
+        subject_dir = os.path.join(resolved_chapters_dir, subject)
         if os.path.isdir(subject_dir):
             for year in os.listdir(subject_dir):
                 if year.isdigit() and os.path.isdir(os.path.join(subject_dir, year)):
                     years.add(year)
     return sorted(list(years), reverse=True)
 
-def get_years(subject):
-    subject_dir = os.path.join(CHAPTERS_DIR, subject)
+def get_years(subject, chapters_dir=None):
+    subject_dir = os.path.join(_resolve_chapters_dir(chapters_dir), subject)
     if not os.path.exists(subject_dir):
         return []
     years = [d for d in os.listdir(subject_dir) if os.path.isdir(os.path.join(subject_dir, d))]
     return sorted(years, reverse=True)
 
-def get_files(subject, year):
-    target_dir = os.path.join(CHAPTERS_DIR, subject, year)
+def get_files(subject, year, chapters_dir=None):
+    target_dir = os.path.join(_resolve_chapters_dir(chapters_dir), subject, year)
     if not os.path.exists(target_dir):
         return []
     files = [f for f in os.listdir(target_dir) if f.endswith(".tex") and not f.startswith("content_") and " 相关图" not in target_dir and " 图" not in f]
     return sorted(files)
 
-def get_papers_by_year(year):
+def get_papers_by_year(year, chapters_dir=None, subjects=None):
     """获取某一年份下的所有试卷名称"""
     papers = set()
-    for subject in SUBJECTS:
-        target_dir = os.path.join(CHAPTERS_DIR, subject, year)
+    resolved_chapters_dir = _resolve_chapters_dir(chapters_dir)
+    for subject in _resolve_subjects(subjects):
+        target_dir = os.path.join(resolved_chapters_dir, subject, year)
         if os.path.exists(target_dir):
             for f in os.listdir(target_dir):
                 if f.endswith(".tex") and not f.startswith("content_") and " 相关图" not in target_dir and " 图" not in f:
@@ -46,13 +57,14 @@ def get_papers_by_year(year):
                         papers.add(parts[2])
     return sorted(list(papers))
 
-def get_all_years_by_paper_type(p_type):
+def get_all_years_by_paper_type(p_type, chapters_dir=None, subjects=None):
     """获取指定试卷类型下，题库中包含的年份集合"""
     years = set()
-    if not os.path.exists(CHAPTERS_DIR):
+    resolved_chapters_dir = _resolve_chapters_dir(chapters_dir)
+    if not os.path.exists(resolved_chapters_dir):
         return []
-    for subject in SUBJECTS:
-        subject_dir = os.path.join(CHAPTERS_DIR, subject)
+    for subject in _resolve_subjects(subjects):
+        subject_dir = os.path.join(resolved_chapters_dir, subject)
         if not os.path.isdir(subject_dir):
             continue
         for year in os.listdir(subject_dir):
@@ -71,11 +83,12 @@ def get_all_years_by_paper_type(p_type):
                 continue
     return sorted(list(years), reverse=True)
 
-def get_papers_by_year_and_type(year, p_type):
+def get_papers_by_year_and_type(year, p_type, chapters_dir=None, subjects=None):
     """获取某一年份下指定试卷类型的所有试卷名称"""
     papers = set()
-    for subject in SUBJECTS:
-        target_dir = os.path.join(CHAPTERS_DIR, subject, year)
+    resolved_chapters_dir = _resolve_chapters_dir(chapters_dir)
+    for subject in _resolve_subjects(subjects):
+        target_dir = os.path.join(resolved_chapters_dir, subject, year)
         if os.path.exists(target_dir):
             for f in os.listdir(target_dir):
                 if f.endswith(".tex") and not f.startswith("content_") and " 相关图" not in target_dir and " 图" not in f:
@@ -84,11 +97,12 @@ def get_papers_by_year_and_type(year, p_type):
                         papers.add(parts[2])
     return sorted(list(papers))
 
-def get_questions_by_paper_and_type(year, paper_name, p_type):
+def get_questions_by_paper_and_type(year, paper_name, p_type, chapters_dir=None, subjects=None):
     """获取某年某类型某试卷的所有题目"""
     questions = []
-    for subject in SUBJECTS:
-        target_dir = os.path.join(CHAPTERS_DIR, subject, year)
+    resolved_chapters_dir = _resolve_chapters_dir(chapters_dir)
+    for subject in _resolve_subjects(subjects):
+        target_dir = os.path.join(resolved_chapters_dir, subject, year)
         if os.path.exists(target_dir):
             for f in os.listdir(target_dir):
                 if not (f.endswith(".tex") and not f.startswith("content_") and " 图" not in f):
@@ -105,11 +119,12 @@ def get_questions_by_paper_and_type(year, paper_name, p_type):
             return 999
     return sorted(questions, key=sort_key)
 
-def get_questions_by_paper(year, paper_name):
+def get_questions_by_paper(year, paper_name, chapters_dir=None, subjects=None):
     """获取某年某试卷的所有题目"""
     questions = []
-    for subject in SUBJECTS:
-        target_dir = os.path.join(CHAPTERS_DIR, subject, year)
+    resolved_chapters_dir = _resolve_chapters_dir(chapters_dir)
+    for subject in _resolve_subjects(subjects):
+        target_dir = os.path.join(resolved_chapters_dir, subject, year)
         if os.path.exists(target_dir):
             for f in os.listdir(target_dir):
                 if f.endswith(".tex") and not f.startswith("content_") and " 图" not in f and f"-{paper_name}-" in f:
