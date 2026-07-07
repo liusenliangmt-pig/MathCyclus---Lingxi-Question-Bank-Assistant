@@ -33,6 +33,36 @@ from utils.file_ops import *
 from utils.tikz_ops import *
 from utils.latex_ops import *
 from utils.csv_ops import add_to_csv_index, update_csv_index_for_edit
+from utils.physics_question_ops import (
+    ANSWER_FIELD,
+    CHAPTER_FIELD,
+    DIFFICULTY_FIELD,
+    ENABLED_FIELD,
+    EXPERIMENT_TYPE_FIELD,
+    GRADE_FIELD,
+    HAS_CIRCUIT_FIELD,
+    HAS_FORCE_FIELD,
+    HAS_LIGHT_FIELD,
+    HAS_TABLE_FIELD,
+    ID_FIELD,
+    IMAGE_TYPE_FIELD,
+    KNOWLEDGE_POINT_FIELD,
+    PDF_RESERVED_DEFAULTS,
+    PROBLEM_FIELD,
+    QUESTION_TYPE_FIELD,
+    REMARK_FIELD,
+    SCORE_FIELD,
+    SOLUTION_FIELD,
+    SOURCE_FIELD,
+    STAGE_FIELD,
+    TAGS_FIELD,
+    UNIT_RULE_FIELD,
+    VOLUME_FIELD,
+    PhysicsQuestionError,
+    load_physics_question_payload,
+    save_existing_physics_question_edit,
+    save_new_physics_question,
+)
 
 
 DISCIPLINE_SESSION_KEY = "active_discipline_code"
@@ -40,19 +70,6 @@ DISCIPLINE_SELECT_WIDGET_KEY = "discipline_selector"
 DISCIPLINE_STATE_KEYS = (
     "browse_subject",
     "browse_mode",
-    "adv_search_active",
-    "adv_last_query",
-    "adv_last_results",
-    "adv_results_page",
-    "adv_t1",
-    "adv_t2",
-    "adv_t3",
-    "adv_q1",
-    "adv_q2",
-    "adv_q3",
-    "adv_q1_sel",
-    "adv_q2_sel",
-    "adv_q3_sel",
     "time_browse_page",
     "time_max_show_prev",
     "exam_selected_qs",
@@ -124,6 +141,35 @@ def init_namespaced_widget_state(discipline_code: str, widget_name: str, default
     elif valid_values is not None and st.session_state[widget_key] not in valid_values:
         st.session_state[widget_key] = default
     return widget_key, persist_key
+
+
+def adv_state_key(name: str, discipline_code: str | None = None) -> str:
+    return state_key(discipline_code or get_active_discipline_code(), name)
+
+
+def get_adv_state(name: str, default=None, discipline_code: str | None = None):
+    return st.session_state.get(adv_state_key(name, discipline_code), default)
+
+
+def set_adv_state(name: str, value, discipline_code: str | None = None):
+    st.session_state[adv_state_key(name, discipline_code)] = value
+
+
+def pop_adv_state(name: str, discipline_code: str | None = None):
+    st.session_state.pop(adv_state_key(name, discipline_code), None)
+
+
+def init_adv_select_state(name: str, options, default="全文内容", discipline_code: str | None = None) -> str:
+    key = adv_state_key(name, discipline_code)
+    if key not in st.session_state:
+        st.session_state[key] = default
+    elif st.session_state[key] not in options:
+        st.session_state[key] = default
+    return key
+
+
+def get_difficulty_value(row_or_meta: dict) -> str:
+    return str((row_or_meta.get("难度星级", "") or row_or_meta.get("难度", "") or "")).strip()
 
 
 def _csv_index_cache_token_for_runtime(runtime_config) -> str:
@@ -1076,13 +1122,13 @@ def show_mathcyclus_intro():
     components.html(demo_html, height=760, scrolling=True)
 
 def _adv_search_queries_from_session():
-    t1 = st.session_state.get("adv_t1", "全文内容")
-    t2 = st.session_state.get("adv_t2", "全文内容")
-    t3 = st.session_state.get("adv_t3", "全文内容")
+    t1 = get_adv_state("adv_t1", "全文内容")
+    t2 = get_adv_state("adv_t2", "全文内容")
+    t3 = get_adv_state("adv_t3", "全文内容")
 
-    q1 = st.session_state.get("adv_q1_sel" if t1 == "题目类型" else "adv_q1", "")
-    q2 = st.session_state.get("adv_q2_sel" if t2 == "题目类型" else "adv_q2", "")
-    q3 = st.session_state.get("adv_q3_sel" if t3 == "题目类型" else "adv_q3", "")
+    q1 = get_adv_state("adv_q1_sel" if t1 == "题目类型" else "adv_q1", "")
+    q2 = get_adv_state("adv_q2_sel" if t2 == "题目类型" else "adv_q2", "")
+    q3 = get_adv_state("adv_q3_sel" if t3 == "题目类型" else "adv_q3", "")
     return (q1 or ""), (q2 or ""), (q3 or "")
 
 def _adv_search_has_query():
@@ -1090,8 +1136,8 @@ def _adv_search_has_query():
     return bool(str(q1).strip() or str(q2).strip() or str(q3).strip())
 
 def _clear_advanced_search_result_cache():
-    st.session_state.pop("adv_last_query", None)
-    st.session_state.pop("adv_last_results", None)
+    pop_adv_state("adv_last_query")
+    pop_adv_state("adv_last_results")
 
 def save_modified_tex_file(file_path, new_content):
     """
@@ -1178,7 +1224,7 @@ def _csv_has_question_record(file_path: str) -> bool:
 def _forget_deleted_question_path(file_path: str):
     target = _norm_abs_path(file_path)
 
-    for key in ("adv_last_results",):
+    for key in (adv_state_key("adv_last_results"),):
         rows = st.session_state.get(key)
         if isinstance(rows, list):
             st.session_state[key] = [
@@ -1666,7 +1712,7 @@ def render_static_question_header(q_label: str, content: str, fpath: str, extra_
 
     from utils.latex_ops import parse_meta_data
     meta, _ = parse_meta_data(content)
-    diff = (meta.get("难度星级", "") or "").strip()
+    diff = get_difficulty_value(meta)
     tags = (meta.get("标签", "") or "").strip()
     remark = (meta.get("备注", "") or "").strip()
 
@@ -3621,7 +3667,7 @@ button[kind="secondary"][data-testid="stBaseButton-secondary"][aria-label="放�
                         c_msg.success(f"处理完成，共保存 {count} 个文件")
                         def _jump_to_browse_same_paper():
                             st.session_state["main_sidebar_radio"] = "🔍\n全局浏览与编辑"
-                            st.session_state["adv_search_active"] = False
+                            set_adv_state("adv_search_active", False)
                             st.session_state["recent_saved_active"] = True
                             st.session_state["recent_saved_paths"] = [log.get("path") for log in log_msg if log.get("status") == "success" and log.get("path")]
                         c_jump.button("跳转至全局浏览查看 ↗", use_container_width=True, type="primary", key="jump_to_browse_same_paper", on_click=_jump_to_browse_same_paper)
@@ -3707,7 +3753,7 @@ button[kind="secondary"][data-testid="stBaseButton-secondary"][aria-label="放�
                         c_msg.success(f"处理完成，共保存 {count} 个文件")
                         def _jump_to_browse_batch():
                             st.session_state["main_sidebar_radio"] = "🔍\n全局浏览与编辑"
-                            st.session_state["adv_search_active"] = False
+                            set_adv_state("adv_search_active", False)
                             st.session_state["recent_saved_active"] = True
                             st.session_state["recent_saved_paths"] = [log.get("path") for log in log_msg if log.get("status") == "success" and log.get("path")]
                         c_jump.button("跳转至全局浏览查看 ↗", use_container_width=True, type="primary", key="jump_to_browse_batch", on_click=_jump_to_browse_batch)
@@ -3988,7 +4034,7 @@ def page_browse(is_exam_mode=False, is_delete_mode=False):
                 with st.container(key="delete_mode_exit_btn_wrap"):
                     if st.button("退出\n删除模式", key="delete_mode_exit_btn", type="secondary", use_container_width=True):
                         st.session_state["tools_subpage"] = None
-                        st.session_state["adv_search_active"] = False
+                        set_adv_state("adv_search_active", False)
                         _clear_advanced_search_result_cache()
                         st.rerun()
             with restore_btn_col:
@@ -4135,11 +4181,11 @@ def page_browse(is_exam_mode=False, is_delete_mode=False):
         return
     
     # === 如果激活了搜索，优先显示搜索结果 ===
-    if not is_exam_mode and st.session_state.get("adv_search_active"):
+    if not is_exam_mode and get_adv_state("adv_search_active"):
         if _adv_search_has_query():
             render_advanced_search_results(is_delete_mode=is_delete_mode)
             return  # 搜索状态下，不显示下方的常规浏览内容
-        st.session_state["adv_search_active"] = False
+        set_adv_state("adv_search_active", False)
     
     selected_file_path = None
     
@@ -6789,7 +6835,7 @@ def page_tools():
         st.markdown("<style>div:has(> button[key='btn_tools_delete_questions']) { margin-top: -65px; padding: 0 20px; position: relative; z-index: 10; }</style>", unsafe_allow_html=True)
         if st.button("开始删除选定问题", key="btn_tools_delete_questions", use_container_width=True):
             st.session_state["tools_subpage"] = "delete_questions"
-            st.session_state["adv_search_active"] = False
+            set_adv_state("adv_search_active", False)
             _clear_advanced_search_result_cache()
             st.rerun()
 
@@ -7929,7 +7975,9 @@ def _advanced_search_index_cached(discipline_code, csv_path, chapters_dir, csv_t
             "stem": stem,
             "answer": answer,
             "solution": solution,
-            "difficulty": row.get("难度星级", "") or "",
+            "difficulty": get_difficulty_value(row),
+            "question_id": (row.get("题目ID", "") or row.get("ID", "") or "").strip(),
+            "subject": (row.get("知识板块", "") or "").strip(),
             "tags": tags,
             "remark": remark,
             "full_text": "\n".join([stem, answer, solution, tags, remark]),
@@ -8299,6 +8347,186 @@ def _format_runtime_row_label(row):
     return " | ".join(parts) if parts else fname or "未命名题目"
 
 
+def _physics_default_payload(runtime):
+    difficulty_default = runtime.difficulty_levels[2] if len(runtime.difficulty_levels) > 2 else runtime.difficulty_levels[0]
+    payload = {
+        ID_FIELD: "",
+        STAGE_FIELD: runtime.school_stages[0] if runtime.school_stages else "",
+        GRADE_FIELD: runtime.grades[0] if runtime.grades else "",
+        VOLUME_FIELD: "通用",
+        CHAPTER_FIELD: runtime.subjects[0] if runtime.subjects else "",
+        KNOWLEDGE_POINT_FIELD: "",
+        QUESTION_TYPE_FIELD: runtime.question_types[0] if runtime.question_types else "",
+        DIFFICULTY_FIELD: difficulty_default,
+        SCORE_FIELD: "5",
+        TAGS_FIELD: "",
+        SOURCE_FIELD: "本地原创测试题",
+        ENABLED_FIELD: "是",
+        REMARK_FIELD: "",
+        EXPERIMENT_TYPE_FIELD: "无",
+        IMAGE_TYPE_FIELD: "无",
+        UNIT_RULE_FIELD: "",
+        HAS_CIRCUIT_FIELD: "否",
+        HAS_FORCE_FIELD: "否",
+        HAS_LIGHT_FIELD: "否",
+        HAS_TABLE_FIELD: "否",
+        PROBLEM_FIELD: "",
+        ANSWER_FIELD: "",
+        SOLUTION_FIELD: "",
+    }
+    payload.update(PDF_RESERVED_DEFAULTS)
+    return payload
+
+
+def _select_index(options, value):
+    try:
+        return list(options).index(value)
+    except ValueError:
+        return 0
+
+
+def _physics_bool_select(label, default_value, key):
+    return st.selectbox(label, ["否", "是"], index=_select_index(["否", "是"], default_value or "否"), key=key)
+
+
+def _render_physics_question_form(mode="new", file_path=None):
+    runtime = get_active_runtime_config()
+    if runtime.discipline_key != "physics":
+        st.error("物理题保存表单只能在物理模式下使用。")
+        return
+
+    is_edit = mode == "edit"
+    code = runtime.discipline_key
+    if is_edit:
+        try:
+            defaults = load_physics_question_payload(file_path, runtime)
+        except PhysicsQuestionError as exc:
+            st.error(str(exc))
+            return
+        form_prefix = state_key(code, "edit_" + hashlib.md5(str(file_path).encode("utf-8")).hexdigest())
+        title = "编辑物理题"
+    else:
+        defaults = _physics_default_payload(runtime)
+        form_prefix = state_key(code, "entry")
+        title = "录入物理题"
+
+    st.subheader(title)
+    with st.form(f"{form_prefix}_form"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            qid = st.text_input("题目ID", value=defaults.get(ID_FIELD, ""), key=f"{form_prefix}_id")
+            stage = st.selectbox("学段", runtime.school_stages, index=_select_index(runtime.school_stages, defaults.get(STAGE_FIELD, "")), key=f"{form_prefix}_stage")
+            grade = st.selectbox("年级", runtime.grades, index=_select_index(runtime.grades, defaults.get(GRADE_FIELD, "")), key=f"{form_prefix}_grade")
+            volume = st.text_input("册别", value=defaults.get(VOLUME_FIELD, "通用"), key=f"{form_prefix}_volume")
+        with c2:
+            chapter = st.selectbox("知识板块", runtime.subjects, index=_select_index(runtime.subjects, defaults.get(CHAPTER_FIELD, "")), key=f"{form_prefix}_chapter")
+            knowledge_point = st.text_input("知识点", value=defaults.get(KNOWLEDGE_POINT_FIELD, ""), key=f"{form_prefix}_knowledge_point")
+            question_type = st.selectbox("题型", runtime.question_types, index=_select_index(runtime.question_types, defaults.get(QUESTION_TYPE_FIELD, "")), key=f"{form_prefix}_question_type")
+            difficulty = st.selectbox("难度", runtime.difficulty_levels, index=_select_index(runtime.difficulty_levels, defaults.get(DIFFICULTY_FIELD, "")), key=f"{form_prefix}_difficulty")
+        with c3:
+            score = st.text_input("分值", value=defaults.get(SCORE_FIELD, "5"), key=f"{form_prefix}_score")
+            tags = st.text_input("标签", value=defaults.get(TAGS_FIELD, ""), key=f"{form_prefix}_tags")
+            source = st.text_input("来源", value=defaults.get(SOURCE_FIELD, "本地原创测试题"), key=f"{form_prefix}_source")
+            remark = st.text_input("备注", value=defaults.get(REMARK_FIELD, ""), key=f"{form_prefix}_remark")
+
+        c4, c5, c6, c7 = st.columns(4)
+        with c4:
+            experiment_type = st.text_input("实验类型", value=defaults.get(EXPERIMENT_TYPE_FIELD, "无"), key=f"{form_prefix}_experiment_type")
+            has_circuit = _physics_bool_select("是否包含电路图", defaults.get(HAS_CIRCUIT_FIELD, "否"), f"{form_prefix}_has_circuit")
+        with c5:
+            image_type = st.text_input("图像类型", value=defaults.get(IMAGE_TYPE_FIELD, "无"), key=f"{form_prefix}_image_type")
+            has_force = _physics_bool_select("是否包含受力图", defaults.get(HAS_FORCE_FIELD, "否"), f"{form_prefix}_has_force")
+        with c6:
+            unit_rule = st.text_input("单位要求", value=defaults.get(UNIT_RULE_FIELD, ""), key=f"{form_prefix}_unit_rule")
+            has_light = _physics_bool_select("是否包含光路图", defaults.get(HAS_LIGHT_FIELD, "否"), f"{form_prefix}_has_light")
+        with c7:
+            enabled = st.selectbox("是否启用", ["是", "否"], index=_select_index(["是", "否"], defaults.get(ENABLED_FIELD, "是")), key=f"{form_prefix}_enabled")
+            has_table = _physics_bool_select("是否包含实验表格", defaults.get(HAS_TABLE_FIELD, "否"), f"{form_prefix}_has_table")
+
+        problem = st.text_area("题干", value=defaults.get(PROBLEM_FIELD, ""), height=160, key=f"{form_prefix}_problem")
+        answer = st.text_area("答案", value=defaults.get(ANSWER_FIELD, ""), height=100, key=f"{form_prefix}_answer")
+        solution = st.text_area("解析", value=defaults.get(SOLUTION_FIELD, ""), height=140, key=f"{form_prefix}_solution")
+
+        with st.expander("PDF 导入预留字段"):
+            p1, p2, p3 = st.columns(3)
+            with p1:
+                source_type = st.text_input("来源类型", value=defaults.get("来源类型", "手动"), key=f"{form_prefix}_source_type")
+                source_file = st.text_input("来源文件", value=defaults.get("来源文件", ""), key=f"{form_prefix}_source_file")
+                source_page = st.text_input("来源页码", value=defaults.get("来源页码", ""), key=f"{form_prefix}_source_page")
+            with p2:
+                source_region = st.text_input("来源区域坐标", value=defaults.get("来源区域坐标", ""), key=f"{form_prefix}_source_region")
+                import_batch_id = st.text_input("导入批次ID", value=defaults.get("导入批次ID", ""), key=f"{form_prefix}_import_batch_id")
+                recognition_method = st.text_input("识别方式", value=defaults.get("识别方式", ""), key=f"{form_prefix}_recognition_method")
+            with p3:
+                ocr_confidence = st.text_input("OCR置信度", value=defaults.get("OCR置信度", ""), key=f"{form_prefix}_ocr_confidence")
+                review_status = st.text_input("审核状态", value=defaults.get("审核状态", "已审核"), key=f"{form_prefix}_review_status")
+                original_image_path = st.text_input("原始图片路径", value=defaults.get("原始图片路径", ""), key=f"{form_prefix}_original_image_path")
+            review_remark = st.text_input("审核备注", value=defaults.get("审核备注", ""), key=f"{form_prefix}_review_remark")
+
+        submit_label = "保存修改" if is_edit else "保存新题"
+        submitted = st.form_submit_button(submit_label, type="primary")
+
+    if not submitted:
+        return
+
+    payload = {
+        ID_FIELD: qid,
+        STAGE_FIELD: stage,
+        GRADE_FIELD: grade,
+        VOLUME_FIELD: volume,
+        CHAPTER_FIELD: chapter,
+        KNOWLEDGE_POINT_FIELD: knowledge_point,
+        QUESTION_TYPE_FIELD: question_type,
+        DIFFICULTY_FIELD: difficulty,
+        SCORE_FIELD: score,
+        TAGS_FIELD: tags,
+        SOURCE_FIELD: source,
+        ENABLED_FIELD: enabled,
+        REMARK_FIELD: remark,
+        EXPERIMENT_TYPE_FIELD: experiment_type,
+        IMAGE_TYPE_FIELD: image_type,
+        UNIT_RULE_FIELD: unit_rule,
+        HAS_CIRCUIT_FIELD: has_circuit,
+        HAS_FORCE_FIELD: has_force,
+        HAS_LIGHT_FIELD: has_light,
+        HAS_TABLE_FIELD: has_table,
+        PROBLEM_FIELD: problem,
+        ANSWER_FIELD: answer,
+        SOLUTION_FIELD: solution,
+        "来源类型": source_type,
+        "来源文件": source_file,
+        "来源页码": source_page,
+        "来源区域坐标": source_region,
+        "导入批次ID": import_batch_id,
+        "识别方式": recognition_method,
+        "OCR置信度": ocr_confidence,
+        "审核状态": review_status,
+        "审核备注": review_remark,
+        "原始图片路径": original_image_path,
+    }
+
+    try:
+        if is_edit:
+            result = save_existing_physics_question_edit(file_path, payload, runtime)
+            st.session_state[state_key(code, "editing_path")] = result.file_path
+            st.success(f"已保存修改：{result.question_id}")
+        else:
+            result = save_new_physics_question(payload, runtime)
+            st.success(f"已保存新题：{result.question_id}")
+        st.cache_data.clear()
+        st.caption(f"物理索引已更新，当前物理题数：{result.physics_count}；数学索引 SHA-256：{result.math_index_sha256}")
+    except PhysicsQuestionError as exc:
+        st.error(str(exc))
+    except Exception as exc:
+        st.error(f"保存失败：{exc}")
+
+
+def page_physics_entry():
+    st.header("📝 录入新题")
+    st.caption("当前仅开放物理单题手动录入；批量、OCR、AI、Word/PDF 导入将在后续阶段开放。")
+    _render_physics_question_form(mode="new")
+
+
 def _render_runtime_question_detail(row, runtime_config=None, selection_mode=False):
     runtime = runtime_config or get_active_runtime_config()
     abs_path = row.get("_abs_path") or get_row_abs_path(row, runtime)
@@ -8318,6 +8546,21 @@ def _render_runtime_question_detail(row, runtime_config=None, selection_mode=Fal
             meta_lines.append(f"{label}：{value}")
     if meta_lines:
         st.caption(" | ".join(meta_lines))
+
+    if runtime.discipline_key == "physics" and not selection_mode:
+        edit_key = state_key(runtime.discipline_key, "editing_path")
+        editing_this = st.session_state.get(edit_key) == abs_path
+        c_edit, c_cancel = st.columns([1, 4])
+        with c_edit:
+            if st.button("编辑本题", key=state_key(runtime.discipline_key, f"edit_button_{hashlib.md5(abs_path.encode('utf-8')).hexdigest()}"), use_container_width=True):
+                st.session_state[edit_key] = abs_path
+                st.rerun()
+        with c_cancel:
+            if editing_this and st.button("取消编辑", key=state_key(runtime.discipline_key, "cancel_edit_button")):
+                st.session_state.pop(edit_key, None)
+                st.rerun()
+        if editing_this:
+            _render_physics_question_form(mode="edit", file_path=abs_path)
 
     if selection_mode:
         selected_key = state_key(runtime.discipline_key, "exam_selected_qs")
@@ -8434,8 +8677,11 @@ def page_physics_readonly_browse(is_exam_mode=False):
 
 
 def page_physics_advanced_search():
-    runtime = get_active_runtime_config()
-    _render_readonly_runtime_browser(runtime, selection_mode=False, heading="🔎 物理全文搜索")
+    st.header("🔎 物理三级查找")
+    render_advanced_search_inline()
+    st.markdown('<hr style="border-top: 1px solid #e1e4e8; margin-top: 10px; margin-bottom: 20px;">', unsafe_allow_html=True)
+    if get_adv_state("adv_search_active") and _adv_search_has_query():
+        render_advanced_search_results()
 
 
 def page_physics_exam_generation():
@@ -8501,11 +8747,11 @@ def page_manual():
     if runtime.discipline_key == "physics":
         st.header("📖 物理题库说明")
         st.markdown(f"""
-当前处于 `{runtime.subject_name}` 的 1D-1 只读接入阶段。
+当前处于 `{runtime.subject_name}` 的 1D-2 基础写入阶段。
 
-- 已开放：学科切换、统计、浏览、筛选、全文搜索、单题详情、随机抽题、已选题与基础组卷。
-- 暂未开放：新题录入、标签编辑、批量修改、OCR 写入、AI 解答写入、删除题目。
-- 物理题库写入功能将在后续阶段开放。
+- 已开放：学科切换、统计、浏览、筛选、全文搜索、单题详情、单题录入、单题编辑、随机抽题、已选题与基础组卷。
+- 暂未开放：删除题目、批量修改、OCR 写入、AI 写入、Word/PDF 导入、自动生成题目。
+- PDF 导入字段已预留，解析与待审核区将在后续阶段开放。
         """)
         return
     st.header("📖 题库规范说明")
@@ -8837,12 +9083,15 @@ def render_advanced_search_inline():
     
     def on_adv_search():
         if not _adv_search_has_query():
-            st.session_state["adv_search_active"] = False
+            set_adv_state("adv_search_active", False)
             st.toast("请输入至少一个关键词后再开始查找。", icon="⚠️")
             return
-        st.session_state["adv_search_active"] = True
+        set_adv_state("adv_search_active", True)
 
-    search_opts = ["全文内容", "题目类型", "题目内容", "解答内容", "难度星级", "标签"]
+    search_opts = ["全文内容", "题目ID", "知识板块", "题目类型", "题目内容", "解答内容", "难度星级", "标签"]
+    t1_key = init_adv_select_state("adv_t1", search_opts)
+    t2_key = init_adv_select_state("adv_t2", search_opts)
+    t3_key = init_adv_select_state("adv_t3", search_opts)
     
     col_inputs, col_btn, col_info = st.columns([2.5, 0.3, 2.3])
     
@@ -8850,41 +9099,41 @@ def render_advanced_search_inline():
         st.markdown('<div id="adv-search-inputs-anchor"></div>', unsafe_allow_html=True)
         c1a, c1b = st.columns([1, 2])
         with c1a: 
-            t1 = st.selectbox("一级类型", search_opts, index=0, key="adv_t1", label_visibility="collapsed")
+            t1 = st.selectbox("一级类型", search_opts, key=t1_key, label_visibility="collapsed")
         with c1b: 
             if t1 == "题目类型":
-                q1 = st.selectbox("一级关键词", ["选择题", "填空题", "解答题"], key="adv_q1_sel", label_visibility="collapsed", on_change=on_adv_search)
+                q1 = st.selectbox("一级关键词", ["选择题", "填空题", "解答题"], key=adv_state_key("adv_q1_sel"), label_visibility="collapsed", on_change=on_adv_search)
             else:
-                q1 = st.text_input("一级关键词", placeholder="输入一级关键词...", key="adv_q1", label_visibility="collapsed", on_change=on_adv_search)
+                q1 = st.text_input("一级关键词", placeholder="输入一级关键词...", key=adv_state_key("adv_q1"), label_visibility="collapsed", on_change=on_adv_search)
                 
         c2a, c2b = st.columns([1, 2])
         with c2a: 
-            t2 = st.selectbox("二级类型", search_opts, index=0, key="adv_t2", label_visibility="collapsed")
+            t2 = st.selectbox("二级类型", search_opts, key=t2_key, label_visibility="collapsed")
         with c2b: 
             if t2 == "题目类型":
-                q2 = st.selectbox("二级关键词", ["选择题", "填空题", "解答题"], key="adv_q2_sel", label_visibility="collapsed", on_change=on_adv_search)
+                q2 = st.selectbox("二级关键词", ["选择题", "填空题", "解答题"], key=adv_state_key("adv_q2_sel"), label_visibility="collapsed", on_change=on_adv_search)
             else:
-                q2 = st.text_input("二级关键词", placeholder="输入二级关键词...", key="adv_q2", label_visibility="collapsed", on_change=on_adv_search)
+                q2 = st.text_input("二级关键词", placeholder="输入二级关键词...", key=adv_state_key("adv_q2"), label_visibility="collapsed", on_change=on_adv_search)
                 
         c3a, c3b = st.columns([1, 2])
         with c3a: 
-            t3 = st.selectbox("三级类型", search_opts, index=0, key="adv_t3", label_visibility="collapsed")
+            t3 = st.selectbox("三级类型", search_opts, key=t3_key, label_visibility="collapsed")
         with c3b: 
             if t3 == "题目类型":
-                q3 = st.selectbox("三级关键词", ["选择题", "填空题", "解答题"], key="adv_q3_sel", label_visibility="collapsed", on_change=on_adv_search)
+                q3 = st.selectbox("三级关键词", ["选择题", "填空题", "解答题"], key=adv_state_key("adv_q3_sel"), label_visibility="collapsed", on_change=on_adv_search)
             else:
-                q3 = st.text_input("三级关键词", placeholder="输入三级关键词...", key="adv_q3", label_visibility="collapsed", on_change=on_adv_search)
+                q3 = st.text_input("三级关键词", placeholder="输入三级关键词...", key=adv_state_key("adv_q3"), label_visibility="collapsed", on_change=on_adv_search)
     
     with col_btn:
         st.markdown('<div id="adv-search-btn-anchor"></div>', unsafe_allow_html=True)
         st.button("🔎  \n开 始  \n查 找", use_container_width=True, type="secondary", on_click=on_adv_search)
 
     with col_info:
-        q1 = st.session_state.get("adv_q1_sel" if t1 == "题目类型" else "adv_q1", "")
-        q2 = st.session_state.get("adv_q2_sel" if t2 == "题目类型" else "adv_q2", "")
-        q3 = st.session_state.get("adv_q3_sel" if t3 == "题目类型" else "adv_q3", "")
+        q1 = get_adv_state("adv_q1_sel" if t1 == "题目类型" else "adv_q1", "")
+        q2 = get_adv_state("adv_q2_sel" if t2 == "题目类型" else "adv_q2", "")
+        q3 = get_adv_state("adv_q3_sel" if t3 == "题目类型" else "adv_q3", "")
         
-        if not (st.session_state.get("adv_search_active") and (q1 or q2 or q3)):
+        if not (get_adv_state("adv_search_active") and (q1 or q2 or q3)):
             st.info("👈 请在左侧输入查找条件，点击“开始查找”或回车即可在下方显示结果。")
             return
         
@@ -8896,19 +9145,19 @@ def render_advanced_search_inline():
         search_str = " | ".join(search_info)
         st.markdown(f"**检索条件**: {search_str}")
         if st.button("❌ 退出搜索状态"):
-            st.session_state["adv_search_active"] = False
+            set_adv_state("adv_search_active", False)
             st.rerun()
 
 def render_advanced_search_results(is_delete_mode=False):
     st.markdown("### 🎯 查找结果")
     
-    t1 = st.session_state.get("adv_t1", "全文内容")
-    t2 = st.session_state.get("adv_t2", "全文内容")
-    t3 = st.session_state.get("adv_t3", "全文内容")
+    t1 = get_adv_state("adv_t1", "全文内容")
+    t2 = get_adv_state("adv_t2", "全文内容")
+    t3 = get_adv_state("adv_t3", "全文内容")
     
-    q1 = st.session_state.get("adv_q1_sel" if t1 == "题目类型" else "adv_q1", "")
-    q2 = st.session_state.get("adv_q2_sel" if t2 == "题目类型" else "adv_q2", "")
-    q3 = st.session_state.get("adv_q3_sel" if t3 == "题目类型" else "adv_q3", "")
+    q1 = get_adv_state("adv_q1_sel" if t1 == "题目类型" else "adv_q1", "")
+    q2 = get_adv_state("adv_q2_sel" if t2 == "题目类型" else "adv_q2", "")
+    q3 = get_adv_state("adv_q3_sel" if t3 == "题目类型" else "adv_q3", "")
     
     def _row_match(item, s_type, s_query):
         s_query = (s_query or "").strip()
@@ -8916,6 +9165,10 @@ def render_advanced_search_results(is_delete_mode=False):
             return True
         if s_type == "题目类型":
             return s_query == item["type"]
+        if s_type == "题目ID":
+            return s_query in item.get("question_id", "")
+        if s_type == "知识板块":
+            return s_query in item.get("subject", "")
         if s_type == "题目内容":
             return s_query in item["stem"]
         if s_type == "解答内容":
@@ -8931,8 +9184,8 @@ def render_advanced_search_results(is_delete_mode=False):
         return False
 
     query_key = (t1, q1, t2, q2, t3, q3, "delete" if is_delete_mode else "edit")
-    if st.session_state.get("adv_last_query") == query_key and st.session_state.get("adv_last_results") is not None:
-        results = st.session_state.get("adv_last_results") or []
+    if get_adv_state("adv_last_query") == query_key and get_adv_state("adv_last_results") is not None:
+        results = get_adv_state("adv_last_results") or []
     else:
         runtime = get_active_runtime_config()
         search_rows = _advanced_search_index_cached(
@@ -8956,18 +9209,23 @@ def render_advanced_search_results(is_delete_mode=False):
                     continue
                 results.append({"file": item["file"] or os.path.basename(fpath), "path": fpath})
 
-        st.session_state["adv_last_query"] = query_key
-        st.session_state["adv_last_results"] = results
+        set_adv_state("adv_last_query", query_key)
+        set_adv_state("adv_last_results", results)
     
     if results:
         st.success(f"找到 {len(results)} 个匹配题目")
 
-        page_size = st.selectbox("每页显示", options=[10, 20, 30, 50], index=2, key="adv_results_page_size")
+        page_size_key = init_adv_select_state("adv_results_page_size", [10, 20, 30, 50], 30)
+        page_size = st.selectbox("每页显示", options=[10, 20, 30, 50], key=page_size_key)
         total_pages = (len(results) + page_size - 1) // page_size
-        current_results_page = int(st.session_state.get("adv_results_page", 1) or 1)
+        page_key = adv_state_key("adv_results_page")
+        current_results_page = int(st.session_state.get(page_key, 1) or 1)
         current_results_page = max(1, min(max(1, total_pages), current_results_page))
-        st.session_state["adv_results_page"] = current_results_page
-        page = st.number_input("页码", min_value=1, max_value=max(1, total_pages), value=current_results_page, step=1, key="adv_results_page")
+        if page_key in st.session_state:
+            st.session_state[page_key] = current_results_page
+            page = st.number_input("页码", min_value=1, max_value=max(1, total_pages), step=1, key=page_key)
+        else:
+            page = st.number_input("页码", min_value=1, max_value=max(1, total_pages), value=current_results_page, step=1, key=page_key)
 
         start = (page - 1) * page_size
         end = min(len(results), start + page_size)
@@ -9091,7 +9349,7 @@ def page_advanced_search():
     with c_right:
         render_advanced_search_inline()
     st.markdown('<hr style="border-top: 1px solid #e1e4e8; margin-top: 10px; margin-bottom: 20px;">', unsafe_allow_html=True)
-    if st.session_state.get("adv_search_active") and _adv_search_has_query():
+    if get_adv_state("adv_search_active") and _adv_search_has_query():
         render_advanced_search_results()
 
 # ================= 主程序 =================
@@ -9387,10 +9645,10 @@ def main():
                 st.session_state["main_sidebar_radio"] = previous_nav
                 return
             if sel == "🔍\n全局浏览与编辑":
-                st.session_state["adv_search_active"] = False
+                set_adv_state("adv_search_active", False)
                 st.session_state["browse_mode"] = "按知识板块浏览"
             elif sel != "🔎\n三级查找":
-                st.session_state["adv_search_active"] = False
+                set_adv_state("adv_search_active", False)
             if sel != "🛠️\n工具箱":
                 st.session_state["tools_subpage"] = None
             
@@ -9409,7 +9667,7 @@ def main():
         render_statistics_dashboard()
     elif selected_nav == "📝\n录入新题":
         if get_active_discipline_code() == "physics":
-            render_readonly_feature_notice_page("📝 录入新题")
+            page_physics_entry()
         else:
             page_entry()
     elif selected_nav == "🔍\n全局浏览与编辑":

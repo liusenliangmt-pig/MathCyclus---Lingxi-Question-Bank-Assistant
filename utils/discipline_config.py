@@ -13,6 +13,7 @@ class DisciplineConfig:
     grades: tuple[str, ...]
     question_types: tuple[str, ...]
     subjects: tuple[str, ...]
+    difficulty_levels: tuple[str, ...]
     default_ocr_prompt: str
     ai_role_tagger: str
     ai_role_solver: str
@@ -56,6 +57,7 @@ MATHEMATICS = DisciplineConfig(
         "流程框图",
         "未分类",
     ),
+    difficulty_levels=("0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0", "3.5", "4.0", "4.5", "5.0", "5.5", "6.0"),
     default_ocr_prompt="请识别这张图片中的数学题，并严格按照 LaTeX 格式输出。",
     ai_role_tagger="专业的高中数学教研专家",
     ai_role_solver="资深高中数学教研专家",
@@ -147,6 +149,7 @@ PHYSICS = DisciplineConfig(
         "实验",
         "综合题",
     ),
+    difficulty_levels=("0.0", "0.5", "1.0", "1.5", "2.0", "2.5", "3.0", "3.5", "4.0", "4.5", "5.0", "5.5", "6.0"),
     default_ocr_prompt="请识别这张图片中的物理题，并严格按照 LaTeX 格式输出，保留物理量、单位、图示说明和实验条件。",
     ai_role_tagger="专业的中学物理教研专家",
     ai_role_solver="资深中学物理教研专家",

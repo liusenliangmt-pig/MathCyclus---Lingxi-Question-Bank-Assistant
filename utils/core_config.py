@@ -27,6 +27,7 @@ class RuntimeConfig:
     grades: tuple[str, ...]
     question_types: tuple[str, ...]
     subjects: tuple[str, ...]
+    difficulty_levels: tuple[str, ...]
     default_ocr_prompt: str
     ai_role_tagger: str
     ai_role_solver: str
@@ -56,6 +57,7 @@ def build_runtime_config(discipline_code: str | None = None, base_dir: str | Non
         grades=discipline.grades,
         question_types=discipline.question_types,
         subjects=discipline.subjects,
+        difficulty_levels=discipline.difficulty_levels,
         default_ocr_prompt=discipline.default_ocr_prompt,
         ai_role_tagger=discipline.ai_role_tagger,
         ai_role_solver=discipline.ai_role_solver,

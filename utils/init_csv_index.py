@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.file_service import atomic_write_csv_rows, atomic_write_text, backup_existing_file
 import utils.batch_gen as batch_gen
 from utils.core_config import build_runtime_config
-from utils.csv_ops import get_csv_headers
+from utils.csv_ops import PHYSICS_PDF_RESERVED_HEADERS, get_csv_headers
 from utils.discipline_config import list_discipline_codes, normalize_discipline_code
 from utils.latex_ops import parse_meta_data
 
@@ -129,6 +129,7 @@ def parse_question_record(file_path: str, runtime_config):
         has_light = meta_dict.get("是否包含光路图", "")
         has_table = meta_dict.get("是否包含实验表格", "")
         source = meta_dict.get("来源", "")
+        pdf_reserved = {field: meta_dict.get(field, "") for field in PHYSICS_PDF_RESERVED_HEADERS}
     else:
         year = str(meta_dict.get("年份", "")).strip()
         ptype = str(meta_dict.get("试卷类型", "")).strip()
@@ -150,6 +151,7 @@ def parse_question_record(file_path: str, runtime_config):
         has_light = str(meta_dict.get("是否包含光路图", "")).strip()
         has_table = str(meta_dict.get("是否包含实验表格", "")).strip()
         source = str(meta_dict.get("来源", "")).strip()
+        pdf_reserved = {field: str(meta_dict.get(field, "")).strip() for field in PHYSICS_PDF_RESERVED_HEADERS}
 
     q_type = infer_question_type(stem_text, pname, meta_dict)
     stat = os.stat(file_path)
@@ -157,7 +159,7 @@ def parse_question_record(file_path: str, runtime_config):
     modified_time = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     rel_path = os.path.relpath(file_path, runtime_config.chapters_dir)
 
-    return {
+    row = {
         "题目ID": qid,
         "文件名称": name_body,
         "相对文件路径": rel_path,
@@ -193,6 +195,8 @@ def parse_question_record(file_path: str, runtime_config):
         "是否包含实验表格": has_table,
         "来源": source,
     }
+    row.update(pdf_reserved)
+    return row
 
 
 def normalize_rel_path(rel_path: str):

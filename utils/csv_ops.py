@@ -45,6 +45,29 @@ PHYSICS_APPENDED_HEADERS = [
     "是否包含光路图",
     "是否包含实验表格",
     "来源",
+    "来源类型",
+    "来源文件",
+    "来源页码",
+    "来源区域坐标",
+    "导入批次ID",
+    "识别方式",
+    "OCR置信度",
+    "审核状态",
+    "审核备注",
+    "原始图片路径",
+]
+
+PHYSICS_PDF_RESERVED_HEADERS = [
+    "来源类型",
+    "来源文件",
+    "来源页码",
+    "来源区域坐标",
+    "导入批次ID",
+    "识别方式",
+    "OCR置信度",
+    "审核状态",
+    "审核备注",
+    "原始图片路径",
 ]
 
 
@@ -239,6 +262,16 @@ def add_to_csv_index(file_path, content, year, ptype, pname, pnum, subj, runtime
         "是否包含光路图": meta.get("是否包含光路图", ""),
         "是否包含实验表格": meta.get("是否包含实验表格", ""),
         "来源": meta.get("来源", ""),
+        "来源类型": meta.get("来源类型", ""),
+        "来源文件": meta.get("来源文件", ""),
+        "来源页码": meta.get("来源页码", ""),
+        "来源区域坐标": meta.get("来源区域坐标", ""),
+        "导入批次ID": meta.get("导入批次ID", ""),
+        "识别方式": meta.get("识别方式", ""),
+        "OCR置信度": meta.get("OCR置信度", ""),
+        "审核状态": meta.get("审核状态", ""),
+        "审核备注": meta.get("审核备注", ""),
+        "原始图片路径": meta.get("原始图片路径", ""),
     }
 
     data.append(new_row)
@@ -293,6 +326,8 @@ def update_csv_index_for_edit(old_file_path, new_file_path, new_content, new_yea
             row["是否包含光路图"] = meta.get("是否包含光路图", row.get("是否包含光路图", ""))
             row["是否包含实验表格"] = meta.get("是否包含实验表格", row.get("是否包含实验表格", ""))
             row["来源"] = meta.get("来源", row.get("来源", ""))
+            for pdf_field in PHYSICS_PDF_RESERVED_HEADERS:
+                row[pdf_field] = meta.get(pdf_field, row.get(pdf_field, ""))
             found = True
             break
 
