@@ -63,6 +63,22 @@ from utils.physics_question_ops import (
     save_existing_physics_question_edit,
     save_new_physics_question,
 )
+from utils.import_review_ops import (
+    APPROVED,
+    PENDING_REVIEW,
+    REJECTED,
+    REVIEW_STATUS_LABELS,
+    ImportReviewError,
+    approve_import_candidate,
+    create_import_batch,
+    default_candidate_payload,
+    get_import_candidate,
+    list_import_candidates,
+    reject_import_candidate,
+    restore_candidate_to_pending,
+    save_import_candidate,
+    update_import_candidate,
+)
 
 
 DISCIPLINE_SESSION_KEY = "active_discipline_code"
@@ -515,9 +531,9 @@ def inject_sidebar_recovery_control():
                         opacity: 1 !important;
                         transform: translateX(0) !important;
                         left: 0 !important;
-                        width: 110px !important;
-                        min-width: 110px !important;
-                        max-width: 110px !important;
+                        width: clamp(280px, 19vw, 300px) !important;
+                        min-width: 280px !important;
+                        max-width: min(300px, 92vw) !important;
                         pointer-events: auto !important;
                     }
                     body.mc-force-sidebar-open #${buttonId},
@@ -8527,6 +8543,320 @@ def page_physics_entry():
     _render_physics_question_form(mode="new")
 
 
+def _candidate_status_label(status: str) -> str:
+    return REVIEW_STATUS_LABELS.get(status, status or "未知")
+
+
+def _candidate_editor(prefix: str, defaults: dict, runtime):
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        candidate_id = st.text_input("candidate_id", value=defaults.get("candidate_id", ""), key=f"{prefix}_candidate_id")
+        question_id = st.text_input("正式题目ID", value=defaults.get("question_id", ""), key=f"{prefix}_question_id")
+        stage = st.selectbox("学段", runtime.school_stages, index=_select_index(runtime.school_stages, defaults.get("stage", "")), key=f"{prefix}_stage")
+        grade = st.selectbox("年级", runtime.grades, index=_select_index(runtime.grades, defaults.get("grade", "")), key=f"{prefix}_grade")
+    with c2:
+        knowledge_block = st.selectbox("知识板块", runtime.subjects, index=_select_index(runtime.subjects, defaults.get("knowledge_block", "")), key=f"{prefix}_knowledge_block")
+        knowledge_point = st.text_input("知识点", value=defaults.get("knowledge_point", ""), key=f"{prefix}_knowledge_point")
+        question_type = st.selectbox("题型", runtime.question_types, index=_select_index(runtime.question_types, defaults.get("question_type", "")), key=f"{prefix}_question_type")
+        difficulty = st.selectbox("难度", runtime.difficulty_levels, index=_select_index(runtime.difficulty_levels, defaults.get("difficulty", "")), key=f"{prefix}_difficulty")
+    with c3:
+        score = st.text_input("分值", value=defaults.get("score", "5"), key=f"{prefix}_score")
+        tags = st.text_input("标签", value=defaults.get("tags", ""), key=f"{prefix}_tags")
+        source = st.text_input("来源", value=defaults.get("source", "本地导入候选题"), key=f"{prefix}_source")
+        remark = st.text_input("备注", value=defaults.get("remark", ""), key=f"{prefix}_remark")
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        volume = st.text_input("册别", value=defaults.get("volume", "通用"), key=f"{prefix}_volume")
+        experiment_type = st.text_input("实验类型", value=defaults.get("experiment_type", "无"), key=f"{prefix}_experiment_type")
+    with m2:
+        image_type = st.text_input("图像类型", value=defaults.get("image_type", "无"), key=f"{prefix}_image_type")
+        unit_requirement = st.text_input("单位要求", value=defaults.get("unit_requirement", ""), key=f"{prefix}_unit_requirement")
+    with m3:
+        has_circuit = st.selectbox("是否包含电路图", ["否", "是"], index=_select_index(["否", "是"], defaults.get("has_circuit_diagram", "否")), key=f"{prefix}_has_circuit")
+        has_force = st.selectbox("是否包含受力图", ["否", "是"], index=_select_index(["否", "是"], defaults.get("has_force_diagram", "否")), key=f"{prefix}_has_force")
+    with m4:
+        has_optical = st.selectbox("是否包含光路图", ["否", "是"], index=_select_index(["否", "是"], defaults.get("has_optical_diagram", "否")), key=f"{prefix}_has_optical")
+        has_table = st.selectbox("是否包含实验表格", ["否", "是"], index=_select_index(["否", "是"], defaults.get("has_experiment_table", "否")), key=f"{prefix}_has_table")
+
+    problem = st.text_area("题干", value=defaults.get("problem", ""), height=140, key=f"{prefix}_problem")
+    answer = st.text_area("答案", value=defaults.get("answer", ""), height=90, key=f"{prefix}_answer")
+    solutions = st.text_area("解析", value=defaults.get("solutions", ""), height=120, key=f"{prefix}_solutions")
+
+    with st.expander("来源追踪字段"):
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            source_type = st.text_input("source_type", value=defaults.get("source_type", "manual"), key=f"{prefix}_source_type")
+            source_file = st.text_input("source_file", value=defaults.get("source_file", ""), key=f"{prefix}_source_file")
+            source_page = st.text_input("source_page", value=defaults.get("source_page", ""), key=f"{prefix}_source_page")
+        with s2:
+            source_region = st.text_input("source_region", value=defaults.get("source_region", ""), key=f"{prefix}_source_region")
+            recognition_method = st.text_input("recognition_method", value=defaults.get("recognition_method", "manual"), key=f"{prefix}_recognition_method")
+            ocr_confidence = st.text_input("ocr_confidence", value=defaults.get("ocr_confidence", ""), key=f"{prefix}_ocr_confidence")
+        with s3:
+            original_image_path = st.text_input("original_image_path", value=defaults.get("original_image_path", ""), key=f"{prefix}_original_image_path")
+            review_notes = st.text_input("review_notes", value=defaults.get("review_notes", ""), key=f"{prefix}_review_notes")
+
+    return {
+        "candidate_id": candidate_id,
+        "discipline": "physics",
+        "review_notes": review_notes,
+        "source_type": source_type,
+        "source_file": source_file,
+        "source_page": source_page,
+        "source_region": source_region,
+        "recognition_method": recognition_method,
+        "ocr_confidence": ocr_confidence,
+        "original_image_path": original_image_path,
+        "question_id": question_id,
+        "stage": stage,
+        "grade": grade,
+        "volume": volume,
+        "knowledge_block": knowledge_block,
+        "knowledge_point": knowledge_point,
+        "question_type": question_type,
+        "difficulty": difficulty,
+        "score": score,
+        "tags": tags,
+        "source": source,
+        "remark": remark,
+        "experiment_type": experiment_type,
+        "image_type": image_type,
+        "unit_requirement": unit_requirement,
+        "has_circuit_diagram": has_circuit,
+        "has_force_diagram": has_force,
+        "has_optical_diagram": has_optical,
+        "has_experiment_table": has_table,
+        "enabled": defaults.get("enabled", "是"),
+        "problem": problem,
+        "answer": answer,
+        "solutions": solutions,
+    }
+
+
+def _phase2a_builtin_candidate(batch_id: str, runtime) -> dict:
+    data = default_candidate_payload(batch_id, "CAND-TEMP-IMPORT-2A-0001")
+    data.update({
+        "question_id": "PHY-TEMP-IMPORT-2A-0001",
+        "stage": "初中",
+        "grade": "八年级",
+        "knowledge_block": "力与运动",
+        "knowledge_point": "二力平衡",
+        "question_type": "计算题",
+        "difficulty": runtime.difficulty_levels[0] if runtime.difficulty_levels else "1.0",
+        "score": "5",
+        "tags": "2A导入审核测试",
+        "source": "本地导入候选题",
+        "remark": "2A候选题框架测试",
+        "source_type": "manual",
+        "source_file": "builtin_phase2a_sample.json",
+        "source_page": "1",
+        "source_region": "N/A",
+        "recognition_method": "manual",
+        "problem": "一个物体受到两个方向相反、大小均为 $3\\,\\mathrm{N}$ 的水平力。求合力大小。",
+        "answer": "$0\\,\\mathrm{N}$。",
+        "solutions": "两力大小相等、方向相反，合力为 $3\\,\\mathrm{N}-3\\,\\mathrm{N}=0\\,\\mathrm{N}$。",
+    })
+    return data
+
+
+def _blank_import_candidate_defaults(batch_id: str) -> dict:
+    """Render an empty candidate form without triggering service-layer ID validation."""
+    return {
+        "candidate_id": "",
+        "discipline": "physics",
+        "review_status": PENDING_REVIEW,
+        "review_notes": "",
+        "source_type": "manual",
+        "source_file": "",
+        "source_page": "",
+        "source_region": "",
+        "recognition_method": "manual",
+        "ocr_confidence": "",
+        "original_image_path": "",
+        "import_batch_id": batch_id or "",
+        "question_id": "",
+        "stage": "",
+        "grade": "",
+        "volume": "通用",
+        "knowledge_block": "",
+        "knowledge_point": "",
+        "question_type": "",
+        "difficulty": "",
+        "score": "5",
+        "tags": "",
+        "source": "本地导入候选题",
+        "remark": "",
+        "experiment_type": "无",
+        "image_type": "无",
+        "unit_requirement": "",
+        "has_circuit_diagram": "否",
+        "has_force_diagram": "否",
+        "has_optical_diagram": "否",
+        "has_experiment_table": "否",
+        "enabled": "是",
+        "problem": "",
+        "answer": "",
+        "solutions": "",
+    }
+
+
+def _render_import_candidate_latex_preview(candidate: dict) -> None:
+    """Preview candidate fields through the same LaTeX-to-Markdown path as formal details."""
+    preview_tex = (
+        "**题干**\n\n"
+        "\\begin{problem}\n"
+        f"{candidate.get('problem', '') or ''}\n"
+        "\\end{problem}\n\n"
+        "\\begin{answer}\n"
+        f"{candidate.get('answer', '') or ''}\n"
+        "\\end{answer}\n\n"
+        "\\begin{solutions}\n"
+        f"{candidate.get('solutions', '') or ''}\n"
+        "\\end{solutions}"
+    )
+    st.markdown(latex_to_markdown(preview_tex, show_title=False), unsafe_allow_html=True)
+
+
+def page_physics_import_review():
+    runtime = get_active_runtime_config()
+    if runtime.discipline_key != "physics":
+        st.header("📥 题库导入与审核")
+        st.info("数学模式暂未开放导入审核入口。")
+        return
+
+    st.header("📥 题库导入与审核")
+    st.caption("当前仅提供 Word/PDF 共用的候选题暂存、预览、人工审核与正式入库框架；暂不上传、解析或 OCR 真实文件。")
+    st.warning("候选题不会直接进入正式题库；只有人工确认“审核通过并入库”后才会调用正式物理题保存接口。")
+
+    batch_key = state_key("physics", "import_review_batch_id")
+    if batch_key not in st.session_state:
+        st.session_state[batch_key] = "MANUAL-IMPORT-2A"
+    batch_id = st.text_input("导入批次ID", key=batch_key)
+
+    c_batch, c_builtin = st.columns(2)
+    with c_batch:
+        if st.button("创建/加载批次", key=state_key("physics", "import_create_batch"), use_container_width=True):
+            try:
+                create_import_batch(batch_id, base_dir=APP_ROOT)
+                st.success(f"批次已就绪：{batch_id}")
+            except ImportReviewError as exc:
+                st.error(str(exc))
+    with c_builtin:
+        if st.button("载入内置测试候选题", key=state_key("physics", "import_builtin_candidate"), use_container_width=True):
+            try:
+                create_import_batch(batch_id, base_dir=APP_ROOT)
+                save_import_candidate(batch_id, _phase2a_builtin_candidate(batch_id, runtime), base_dir=APP_ROOT)
+                st.success("已创建内置测试候选题。")
+            except ImportReviewError as exc:
+                st.error(str(exc))
+
+    st.markdown("---")
+    st.subheader("创建候选题")
+    new_defaults = _blank_import_candidate_defaults(batch_id or "MANUAL-IMPORT-2A")
+    with st.form(state_key("physics", "import_new_candidate_form")):
+        payload = _candidate_editor(state_key("physics", "import_new"), new_defaults, runtime)
+        submitted = st.form_submit_button("保存为待审核候选题", type="primary")
+    if submitted:
+        if not str(payload.get("candidate_id", "")).strip():
+            st.error("candidate_id不能为空")
+        else:
+            try:
+                create_import_batch(batch_id, base_dir=APP_ROOT)
+                payload["import_batch_id"] = batch_id
+                saved = save_import_candidate(batch_id, payload, base_dir=APP_ROOT)
+                st.success(f"候选题已保存：{saved['candidate_id']}")
+            except (ImportReviewError, PhysicsQuestionError) as exc:
+                st.error(str(exc))
+
+    st.markdown("---")
+    st.subheader("候选题列表")
+    try:
+        status_filter = st.selectbox("状态筛选", ["全部", PENDING_REVIEW, APPROVED, REJECTED], format_func=lambda x: "全部" if x == "全部" else _candidate_status_label(x), key=state_key("physics", "import_status_filter"))
+        rows = list_import_candidates(batch_id, base_dir=APP_ROOT, status=None if status_filter == "全部" else status_filter)
+    except ImportReviewError as exc:
+        st.info(f"当前批次尚未创建或无法读取：{exc}")
+        return
+
+    if not rows:
+        st.info("当前批次还没有候选题。")
+        return
+
+    labels = [
+        f"{row['candidate_id']} | {row.get('question_id', '')} | {_candidate_status_label(row.get('review_status', ''))}"
+        for row in rows
+    ]
+    selected_idx = st.selectbox("选择候选题", range(len(rows)), format_func=lambda i: labels[i], key=state_key("physics", "import_selected_candidate"))
+    selected = rows[selected_idx]
+
+    st.markdown("#### 候选题预览")
+    p1, p2, p3 = st.columns(3)
+    p1.metric("状态", _candidate_status_label(selected.get("review_status", "")))
+    p2.metric("candidate_id", selected.get("candidate_id", ""))
+    p3.metric("question_id", selected.get("question_id", ""))
+    st.caption(f"来源文件：{selected.get('source_file', '') or '未设置'} | 页码：{selected.get('source_page', '') or '未设置'} | 批次：{selected.get('import_batch_id', '')}")
+    _render_import_candidate_latex_preview(selected)
+    if selected.get("approval_error"):
+        st.error(f"上次入库失败：{selected.get('approval_error')}")
+
+    with st.expander("编辑候选题字段", expanded=False):
+        with st.form(state_key("physics", f"import_edit_{selected['candidate_id']}")):
+            edit_payload = _candidate_editor(state_key("physics", f"import_edit_{selected['candidate_id']}"), selected, runtime)
+            edit_submitted = st.form_submit_button("保存候选题修改")
+        if edit_submitted:
+            try:
+                edit_payload["import_batch_id"] = batch_id
+                updated = update_import_candidate(batch_id, selected["candidate_id"], edit_payload, base_dir=APP_ROOT)
+                st.success(f"候选题已更新：{updated['candidate_id']}")
+                st.rerun()
+            except (ImportReviewError, PhysicsQuestionError) as exc:
+                st.error(str(exc))
+
+    st.markdown("#### 人工审核")
+    if selected.get("review_status") == PENDING_REVIEW:
+        reject_notes = st.text_input("驳回说明", key=state_key("physics", f"import_reject_notes_{selected['candidate_id']}"))
+        c_reject, c_confirm, c_approve = st.columns([1, 2, 1.2])
+        with c_reject:
+            if st.button("驳回候选题", key=state_key("physics", f"import_reject_{selected['candidate_id']}"), use_container_width=True):
+                try:
+                    reject_import_candidate(batch_id, selected["candidate_id"], reject_notes, base_dir=APP_ROOT)
+                    st.success("候选题已驳回。")
+                    st.rerun()
+                except ImportReviewError as exc:
+                    st.error(str(exc))
+        with c_confirm:
+            confirm_text = (
+                f"确认入库：candidate_id={selected['candidate_id']}；"
+                f"question_id={selected.get('question_id', '')}；"
+                f"知识板块={selected.get('knowledge_block', '')}；"
+                f"来源文件={selected.get('source_file', '') or '未设置'}"
+            )
+            confirmed = st.checkbox(confirm_text, key=state_key("physics", f"import_approve_confirm_{selected['candidate_id']}"))
+        with c_approve:
+            if st.button("审核通过并入库", key=state_key("physics", f"import_approve_{selected['candidate_id']}"), type="primary", disabled=not confirmed, use_container_width=True):
+                try:
+                    result = approve_import_candidate(batch_id, selected["candidate_id"], runtime_config=runtime, base_dir=APP_ROOT)
+                    st.cache_data.clear()
+                    st.success(f"入库成功：{result.question_id}")
+                    st.code(result.official_file_path)
+                    st.rerun()
+                except (ImportReviewError, PhysicsQuestionError) as exc:
+                    st.error(str(exc))
+    elif selected.get("review_status") == REJECTED:
+        st.info("该候选题已驳回。本阶段如需入库，必须先显式恢复为待审核。")
+        if st.button("恢复为待审核", key=state_key("physics", f"import_restore_{selected['candidate_id']}")):
+            try:
+                restore_candidate_to_pending(batch_id, selected["candidate_id"], base_dir=APP_ROOT)
+                st.success("已恢复为待审核。")
+                st.rerun()
+            except ImportReviewError as exc:
+                st.error(str(exc))
+    else:
+        st.success(f"该候选题已通过并入库：{selected.get('official_question_id', '')}")
+        if selected.get("official_file_path"):
+            st.code(selected.get("official_file_path"))
+
+
 def _render_runtime_question_detail(row, runtime_config=None, selection_mode=False):
     runtime = runtime_config or get_active_runtime_config()
     abs_path = row.get("_abs_path") or get_row_abs_path(row, runtime)
@@ -9379,17 +9709,39 @@ def main():
         /* 侧边栏整体背景 - 暗紫色主题 */
         [data-testid="stSidebar"] {
             background-color: #ede9fe !important;
-            min-width: 110px !important;
-            max-width: 110px !important;
+            width: clamp(280px, 19vw, 300px) !important;
+            min-width: 280px !important;
+            max-width: min(300px, 92vw) !important;
+            overflow-x: hidden !important;
         }
 
         /* 调整内部边距，让内容完全居中 */
         [data-testid="stSidebarUserContent"] {
-            padding: 0.3rem 0rem 1rem 0rem !important;
+            padding: 0.7rem 0.75rem 1rem 0.75rem !important;
             display: flex !important;
             flex-direction: column !important;
-            align-items: center !important;
+            align-items: stretch !important;
             justify-content: flex-start !important;
+            overflow-x: hidden !important;
+        }
+        [data-testid="stSidebar"] * {
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+        }
+        [data-testid="stSidebar"] .stButton button,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] {
+            width: 100% !important;
+            min-width: 0 !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stElementContainer"]:has(div[data-testid="stRadio"]),
+        [data-testid="stSidebar"] div[data-testid="stRadio"],
+        [data-testid="stSidebar"] div[data-testid="stRadio"] > div,
+        [data-testid="stSidebar"] div[data-testid="stRadio"] div[role="radiogroup"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+            box-sizing: border-box !important;
         }
         
         /* 隐藏侧边栏默认组件的 Resizer，保留 Collapse 按钮并变白 */
@@ -9453,21 +9805,83 @@ def main():
             display: flex !important;
             flex-direction: column !important;
             justify-content: center !important;
-            align-items: center !important;
+            align-items: stretch !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+        }
+        [data-testid="stSidebar"] div[role="radiogroup"] > label > div:nth-child(2) > div,
+        [data-testid="stSidebar"] div[role="radiogroup"] > label > div:nth-child(2) p {
+            width: 100% !important;
+            inline-size: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+            align-self: stretch !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Streamlit's radio label uses an inner flex row. Stretch that row and
+           let the text cell take the remaining width, otherwise Chinese labels
+           collapse to one character per line inside the widened sidebar. */
+        [data-testid="stSidebar"] div[role="radiogroup"] > label > div:nth-child(2) > div:first-child {
+            display: flex !important;
+            align-items: stretch !important;
+            justify-content: center !important;
+            gap: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+        }
+        [data-testid="stSidebar"] div[role="radiogroup"] > label > div:nth-child(2) > div:first-child > div:first-child {
+            flex: 0 0 0 !important;
+            width: 0 !important;
+            inline-size: 0 !important;
+            max-width: 0 !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+        }
+        [data-testid="stSidebar"] div[role="radiogroup"] > label > div:nth-child(2) > div:first-child > div:last-child {
+            display: block !important;
+            flex: 1 1 auto !important;
+            width: 100% !important;
+            inline-size: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            min-inline-size: 0 !important;
+            align-self: stretch !important;
+            overflow-wrap: break-word !important;
+            word-break: normal !important;
+        }
+        [data-testid="stSidebar"] div[role="radiogroup"] > label > div:nth-child(2) > div:first-child > div:last-child > p {
+            display: block !important;
+            width: 100% !important;
+            inline-size: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+        }
+        [data-testid="stSidebar"] div[role="radiogroup"] > label div,
+        [data-testid="stSidebar"] div[role="radiogroup"] > label p {
+            width: 100% !important;
+            inline-size: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            box-sizing: border-box !important;
         }
         
         /* Radio 容器间距 - 确保内容居中 */
         [data-testid="stSidebar"] div[role="radiogroup"] {
-            gap: 16px !important;
+            gap: 10px !important;
             display: flex !important;
             flex-direction: column !important;
-            align-items: center !important;
+            align-items: stretch !important;
             justify-content: center !important;
         }
         /* 强制把 stRadio 组件本体也居中，避免整体看起来偏移 */
         [data-testid="stSidebar"] div[data-testid="stRadio"] > div {
             display: flex !important;
-            justify-content: center !important;
+            justify-content: stretch !important;
             padding: 0 !important;
         }
 
@@ -9475,12 +9889,13 @@ def main():
         [data-testid="stSidebar"] div[role="radiogroup"] > label {
             display: flex !important;
             flex-direction: column !important;
-            align-items: center !important;
+            align-items: stretch !important;
             justify-content: center !important;
             padding-top: 12px !important;
             padding-bottom: 12px !important;
             margin: 0 auto !important;
-            max-width: 90px !important; /* 固定宽度，居中 */
+            width: 100% !important;
+            max-width: 100% !important;
             border-radius: 12px !important;
             background-color: transparent !important;
             color: #5b21b6 !important;
@@ -9532,11 +9947,21 @@ def main():
             font-weight: 800 !important;
             text-align: center !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 0 0.25rem !important;
             line-height: 1.6 !important;
-            white-space: pre-wrap !important;
+            white-space: pre-line !important;
+            word-break: normal !important;
+            overflow-wrap: break-word !important;
             width: 100% !important;
             color: #5b21b6 !important;
+        }
+
+        @media (max-width: 720px) {
+            [data-testid="stSidebar"] {
+                width: min(88vw, 300px) !important;
+                min-width: min(88vw, 280px) !important;
+                max-width: 92vw !important;
+            }
         }
 
         /* 针对 Streamlit 在亮色模式下覆盖 label 颜色的特殊处理 */
@@ -9618,6 +10043,7 @@ def main():
         # 恢复为上下结构的图标+文字
         api_nav_option = "🔑\nAPI设置"
         exam_nav_option = "🖨️\n组卷服务\n(完善中)"
+        import_nav_option = "📥\n题库导入与审核"
         nav_options = [
             api_nav_option,
             "📊\n数据统计", 
@@ -9629,11 +10055,17 @@ def main():
             "📘\n项目介绍",
             "📖\n规范说明"
         ]
+        if runtime.discipline_key == "physics":
+            nav_options.insert(3, import_nav_option)
         
         if "main_nav_selection" not in st.session_state:
             st.session_state["main_nav_selection"] = "📊\n数据统计"
         if "main_sidebar_radio" not in st.session_state:
             st.session_state["main_sidebar_radio"] = st.session_state["main_nav_selection"]
+        if st.session_state.get("main_sidebar_radio") not in nav_options:
+            st.session_state["main_sidebar_radio"] = "📊\n数据统计"
+        if st.session_state.get("main_nav_selection") not in nav_options:
+            st.session_state["main_nav_selection"] = "📊\n数据统计"
 
         def _on_main_sidebar_nav_change():
             sel = st.session_state.get("main_sidebar_radio")
@@ -9670,6 +10102,8 @@ def main():
             page_physics_entry()
         else:
             page_entry()
+    elif selected_nav == import_nav_option:
+        page_physics_import_review()
     elif selected_nav == "🔍\n全局浏览与编辑":
         if get_active_discipline_code() == "physics":
             page_physics_readonly_browse(is_exam_mode=False)

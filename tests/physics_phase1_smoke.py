@@ -34,7 +34,6 @@ MATH_BASE_FIELDS = [
     "解析",
 ]
 
-
 def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -126,8 +125,8 @@ def main():
     assert_check(
         results,
         "physics duplicate ids",
-        len(set(physics_ids)) == 8,
-        f"unique={len(set(physics_ids))}",
+        len(set(physics_ids)) == len(physics_ids),
+        f"unique={len(set(physics_ids))} total={len(physics_ids)}",
     )
 
     missing_paths = []
@@ -176,6 +175,18 @@ def main():
         "physics runtime rows",
         len(physics_runtime_rows) == 8,
         f"count={len(physics_runtime_rows)}",
+    )
+
+    temp_residuals = [
+        str(Path(path).relative_to(project_root))
+        for path in physics_source_files
+        if "PHY-TEMP-" in Path(path).name
+    ]
+    assert_check(
+        results,
+        "physics no temp source residuals",
+        not temp_residuals,
+        "\n".join(temp_residuals) if temp_residuals else "no PHY-TEMP source residuals",
     )
 
     junior_rows = question_bank_app._filter_runtime_rows(physics_runtime_rows, stage_filter="初中")

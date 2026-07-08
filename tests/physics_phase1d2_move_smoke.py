@@ -78,10 +78,18 @@ def main():
     math_hash_before = sha256_of(math_csv)
     old_path = Path(physics_runtime.chapters_dir) / "初中" / "力与运动" / f"{TEMP_ID}.tex"
     new_path = Path(physics_runtime.chapters_dir) / "初中" / "光现象" / f"{TEMP_ID}.tex"
+    initial_physics_count = 0
     outputs_dir = project_root / "outputs" / "physics_phase1d2_move_smoke"
 
     try:
-        add_result(results, "initial physics count 8", len(list(iter_real_question_files(physics_runtime))) == 8, "checked")
+        initial_physics_count = len(list(iter_real_question_files(physics_runtime)))
+        initial_index_rows = read_csv_index(runtime_config=physics_runtime)
+        add_result(
+            results,
+            "initial physics source/index count match",
+            initial_physics_count == len(initial_index_rows),
+            f"source={initial_physics_count}; index={len(initial_index_rows)}",
+        )
         add_result(results, "initial math count 70", len(read_csv_index(runtime_config=math_runtime)) == 70, "checked")
         add_result(results, "temp paths absent before test", not old_path.exists() and not new_path.exists(), f"old={old_path}; new={new_path}")
         if old_path.exists() or new_path.exists():
@@ -161,7 +169,7 @@ def main():
         physics_csv.write_bytes(physics_csv_before)
         if outputs_dir.exists():
             shutil.rmtree(outputs_dir)
-        add_result(results, "cleanup physics count restored 8", restored_count == 8, f"count={restored_count}")
+        add_result(results, "cleanup physics count restored", restored_count == initial_physics_count, f"count={restored_count}; expected={initial_physics_count}")
         add_result(results, "cleanup math hash unchanged", sha256_of(math_csv) == math_hash_before, sha256_of(math_csv))
         add_result(results, "cleanup temp old/new removed", not old_path.exists() and not new_path.exists(), f"old={old_path.exists()}; new={new_path.exists()}")
         add_result(results, "cleanup physics csv restored", physics_csv.read_bytes() == physics_csv_before, "restored")

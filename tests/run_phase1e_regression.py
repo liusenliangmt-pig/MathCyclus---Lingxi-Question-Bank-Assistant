@@ -20,8 +20,6 @@ EXPECTED_MATH_SHA = "250092C5158BA3A2185253AC0F0A141E5AE74C5C668A4CC74B208309EDE
 TEMP_DUP_ID = "PHY-TEMP-1E-DUP"
 TEMP_INVALID_ID = "PHY-TEMP-1E-INVALID"
 TEMP_FAIL_ID = "PHY-TEMP-1E-FAIL"
-
-
 def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
 
@@ -157,9 +155,11 @@ def baseline_checks(results, project_root, math_runtime, physics_runtime, api):
     physics_files = [Path(physics_runtime.chapters_dir) / (row.get("相对文件路径") or "") for row in physics_rows]
     math_ids = [row.get("题目ID", "") for row in math_rows]
     physics_ids = [row.get("题目ID", "") for row in physics_rows]
+    real_physics_files = list(api["iter_real_question_files"](physics_runtime))
+    expected_physics_count = 8
     add(results, "math index rows 70", len(math_rows) == 70, len(math_rows))
-    add(results, "physics source files 8", len(list(api["iter_real_question_files"](physics_runtime))) == 8, len(list(api["iter_real_question_files"](physics_runtime))))
-    add(results, "physics index rows 8", len(physics_rows) == 8, len(physics_rows))
+    add(results, "physics source files 8", len(real_physics_files) == expected_physics_count, len(real_physics_files))
+    add(results, "physics index rows 8", len(physics_rows) == expected_physics_count, len(physics_rows))
     add(results, "physics index columns 44", len(physics_rows[0]) == 44, len(physics_rows[0]) if physics_rows else 0)
     add(results, "math sha baseline", sha256_of(math_csv) == EXPECTED_MATH_SHA, sha256_of(math_csv))
     add(results, "math paths exist", all(path.exists() for path in math_files), "checked")
@@ -172,7 +172,8 @@ def baseline_checks(results, project_root, math_runtime, physics_runtime, api):
     residuals = [
         str(path.relative_to(project_root))
         for path in project_root.rglob("*")
-        if path.is_file() and ("PHY-TEMP" in path.name or path.name.endswith(".tmp") or "movebak" in path.name)
+        if path.is_file()
+        and ("PHY-TEMP" in path.name or path.name.endswith(".tmp") or "movebak" in path.name)
     ]
     add(results, "no temp residuals", not residuals, residuals[:10])
 
@@ -432,7 +433,8 @@ def main():
     final_temp_residuals = [
         str(path.relative_to(project_root))
         for path in project_root.rglob("*")
-        if path.is_file() and ("PHY-TEMP" in path.name or path.name.endswith(".tmp") or "movebak" in path.name)
+        if path.is_file()
+        and ("PHY-TEMP" in path.name or path.name.endswith(".tmp") or "movebak" in path.name)
     ]
     add(results, "math index bytes unchanged", final_math_bytes == initial_math_bytes, sha256_of(math_csv))
     add(results, "initial math sha recorded", initial_math_sha == EXPECTED_MATH_SHA, initial_math_sha)

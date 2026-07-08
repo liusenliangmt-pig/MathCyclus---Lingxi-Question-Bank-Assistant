@@ -63,12 +63,15 @@ def main():
     math_hash_before = sha256_of(math_csv)
     temp_path = Path(physics_runtime.chapters_dir) / "初中" / "力与运动" / f"{TEMP_ID}.tex"
     created_path = None
+    initial_physics_count = 0
     outputs_dir = project_root / "outputs" / "physics_phase1d2_write_smoke"
 
     try:
         initial_files = list(iter_real_question_files(physics_runtime))
+        initial_physics_count = len(initial_files)
         initial_math_rows = read_csv_index(runtime_config=math_runtime)
-        add_result(results, "initial physics count 8", len(initial_files) == 8, f"count={len(initial_files)}")
+        initial_index_rows = read_csv_index(runtime_config=physics_runtime)
+        add_result(results, "initial physics source/index count match", initial_physics_count == len(initial_index_rows), f"source={initial_physics_count}; index={len(initial_index_rows)}")
         add_result(results, "initial math count 70", len(initial_math_rows) == 70, f"count={len(initial_math_rows)}")
         add_result(results, "temp file absent before test", not temp_path.exists(), str(temp_path))
         if temp_path.exists():
@@ -115,7 +118,8 @@ def main():
         created_path = Path(save_result.file_path)
         add_result(results, "new physics save success", created_path.exists(), created_path)
         add_result(results, "new file under chapters_physics", "chapters_physics" in str(created_path), created_path)
-        add_result(results, "physics count after create 9", len(list(iter_real_question_files(physics_runtime))) == 9, f"count={len(list(iter_real_question_files(physics_runtime)))}")
+        after_create_count = len(list(iter_real_question_files(physics_runtime)))
+        add_result(results, "physics count increments after create", after_create_count == initial_physics_count + 1, f"count={after_create_count}")
         add_result(results, "math hash unchanged after create", sha256_of(math_csv) == math_hash_before, sha256_of(math_csv))
 
         question_bank_app.get_active_runtime_config = lambda: physics_runtime
@@ -151,7 +155,7 @@ def main():
         physics_csv.write_bytes(physics_csv_before)
         if outputs_dir.exists():
             shutil.rmtree(outputs_dir)
-        add_result(results, "cleanup physics count restored 8", restored_count == 8, f"count={restored_count}")
+        add_result(results, "cleanup physics count restored", restored_count == initial_physics_count, f"count={restored_count}; expected={initial_physics_count}")
         add_result(results, "cleanup math hash unchanged", sha256_of(math_csv) == math_hash_before, sha256_of(math_csv))
         add_result(results, "cleanup temp file removed", not temp_path.exists(), str(temp_path))
         add_result(results, "cleanup physics csv restored", physics_csv.read_bytes() == physics_csv_before, "restored")
